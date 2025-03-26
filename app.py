@@ -1,6 +1,6 @@
 import os
 import cv2
-import winsound  # For sound on Windows
+# import winsound  # For sound on Windows
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -8,6 +8,8 @@ load_dotenv()
 
 # Replace with your DroidCam IP and port if using Wi-Fi
 DROIDCAM_URL = os.environ.get("DROIDCAM_URL")  # Update with your IP
+
+print(DROIDCAM_URL)
 
 # Initialize video capture
 cap = cv2.VideoCapture(DROIDCAM_URL)
@@ -45,7 +47,7 @@ while True:
         cv2.waitKey(2000)  # Display the message for 2 seconds
 
         # Play a sound for feedback (only works on Windows)
-        winsound.Beep(1000, 500)  # Frequency, duration in milliseconds
+        # winsound.Beep(1000, 500)  # Frequency, duration in milliseconds
 
     elif key == ord('q'):  # Press 'q' to quit
         break

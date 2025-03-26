@@ -1,0 +1,6 @@
+deepface
+tf-keras
+opencv-python>=4.11.0.86
+python-dotenv>=1.1.0
+qdrant-client[fastembed]>=1.13.3
+fastembed==0.5.1
