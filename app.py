@@ -118,11 +118,57 @@ def save_face_data(data_path, faces_data):
 def generate_identifier():
     return str(uuid.uuid4())
 
+def get_familiar_faces_data():
+    """Load all familiar faces data from the database."""
+    familiar_faces = {}
+    if not os.path.exists(DATA_PATH):
+        os.makedirs(DATA_PATH, exist_ok=True)
+        return familiar_faces
+    
+    for file in os.listdir(DATA_PATH):
+        if file.endswith("_data.json"):
+            with open(os.path.join(DATA_PATH, file), "r", encoding="utf-8") as f:
+                data = json.load(f)
+                for face_path, face_data in data.items():
+                    familiar_faces[face_path] = face_data
+    return familiar_faces
+
+
+def find_similar_face(new_face_data, familiar_faces, threshold=0.6):
+    """Check if the new face matches any familiar face using distance threshold."""
+    for known_face_path, known_face_data in familiar_faces.items():
+        try:
+            # Compare using the embeddings
+            distance = DeepFace.verify(
+                img1_path=new_face_data["face_path"],
+                img2_path=known_face_path,
+                model_name="Facenet",
+                distance_metric="cosine",
+                enforce_detection=False
+            )["distance"]
+            
+            if distance < threshold:
+                print(f"Similar face found: {known_face_path}: ({distance:.4f})")
+                return known_face_path, known_face_data
+        except Exception as e:
+            print(f"Error comparing faces: {e}")
+    return None, None
+
+
+def show_familiar_face(face_data):
+    """Display the familiar face image."""
+    img = cv2.imread(face_data["face_path"])
+    if img is not None:
+        cv2.imshow("Familiar Face", img)
+        cv2.waitKey(3000)  # Show for 3 seconds
+        cv2.destroyWindow("Familiar Face")
+
 
 def main():
     cap = initialize_camera()
     frame_count = 0
     photo_count = 0
+    familiar_faces = get_familiar_faces_data()  # Load familiar faces at startup
 
     while True:
         ret, frame = cap.read()
@@ -146,16 +192,18 @@ def main():
             frame_faces_data_path = os.path.join(DATA_PATH, f"{frame_identifier}_data.json")
             save_face_data(frame_faces_data_path, frame_faces_data)
 
-            #TODO:
-            # check if face is already in the familiar faces database
-            # 1. if not (new face), add it to the database
-            # 2. else, open the face photo of the familiar face and show it
+            # Check each new face against familiar faces
+            for face_path, face_data in frame_faces_data.items():
+                known_face_path, known_face_data = find_similar_face(face_data, familiar_faces)
+                if known_face_path:
+                    print("This face is familiar!")
+                    show_familiar_face(known_face_data)
+                else:
+                    print("New face detected - adding to database")
+                    familiar_faces[face_path] = face_data  # Add to in-memory database
 
         elif key == ord('q'):  # Quit on 'q' key
             break
-
-    cap.release()
-    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
