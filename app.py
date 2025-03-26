@@ -4,39 +4,60 @@ import json
 import winsound  # For sound on Windows
 from dotenv import load_dotenv
 from deepface import DeepFace
+import mediapipe as mp
+
 
 # Load environment variables
 load_dotenv()
+
+mp_face_detection = mp.solutions.face_detection
+mp_drawing = mp.solutions.drawing_utils
+face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
+
 DROIDCAM_URL = os.environ.get("DROIDCAM_URL")
 
 # Parameters for optimization
-SCALE_FACTOR = 0.5  # Downscale factor for detection
+SCALE_FACTOR = 1    # Downscale factor for detection
 FRAME_SKIP = 1      # Process face detection every N frames
+
+IMAGES_PATH = os.path.join(os.path.dirname(__file__), "db", "images")
+FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "faces")
+DATA_PATH = os.path.join(os.path.dirname(__file__), "db", "data")
+
+os.makedirs(IMAGES_PATH, exist_ok=True)
+os.makedirs(FACES_PATH, exist_ok=True)
 
 
 def initialize_camera():
     """Initialize video capture."""
-    cap = cv2.VideoCapture(DROIDCAM_URL)
+    # cap = cv2.VideoCapture(DROIDCAM_URL)
+    cap = cv2.VideoCapture(0)
+
     if not cap.isOpened():
         print("Error: Could not open video stream")
         exit()
     return cap
 
 
-def detect_faces(frame):
+def detect_faces(frame, scale=1):
     """Detect faces in the downscaled frame and return bounding box coordinates."""
-    small_frame = cv2.resize(frame, (0, 0), fx=SCALE_FACTOR, fy=SCALE_FACTOR)
     try:
-        faces = DeepFace.extract_faces(small_frame, detector_backend='opencv', enforce_detection=False)
-        return [
-            (
-                int(face["facial_area"]["x"] / SCALE_FACTOR),
-                int(face["facial_area"]["y"] / SCALE_FACTOR),
-                int(face["facial_area"]["w"] / SCALE_FACTOR),
-                int(face["facial_area"]["h"] / SCALE_FACTOR),
-            )
-            for face in faces
-        ]
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        if scale < 1:
+            rgb_frame = cv2.resize(rgb_frame, (0, 0), fx=SCALE_FACTOR, fy=SCALE_FACTOR)
+
+        results = face_detection.process(rgb_frame)
+
+        faces = []
+        if results.detections:
+            for detection in results.detections:
+                bboxC = detection.location_data.relative_bounding_box
+                h, w, _ = frame.shape
+                x, y, w, h = int(bboxC.xmin * w), int(bboxC.ymin * h), int(bboxC.width * w), int(bboxC.height * h)
+                faces.append((x, y, w, h))
+
+        return faces
     except Exception as e:
         print("Face detection error:", e)
         return []
@@ -54,16 +75,19 @@ def capture_photo(frame, faces, photo_count):
         print("No faces detected.")
         return
     
-    frame_path = f"captured_photo_{photo_count}.jpg"
+    frame_identifier = f"captured_photo_{photo_count}.jpg"
+    frame_path = os.path.join(IMAGES_PATH, frame_identifier)
     cv2.imwrite(frame_path, frame)
 
     faces_paths = []
     for i, (x, y, w, h) in enumerate(faces):
         face_crop = frame[y:y + h, x:x + w]
-        frame_path = f"captured_face_{photo_count}_{i}.jpg"
-        cv2.imwrite(frame_path, face_crop)
-        print(f"Face captured and saved as '{frame_path}'")
-        faces_paths.append(frame_path)
+        face_identifier = f"captured_face_{photo_count}_{i}.jpg"
+        face_path = os.path.join(FACES_PATH, face_identifier)
+
+        cv2.imwrite(face_path, face_crop)
+        print(f"Face captured and saved as '{face_path}'")
+        faces_paths.append(face_path)
     
     # Play sound feedback (Windows only)
     winsound.Beep(1000, 500)
@@ -81,6 +105,10 @@ def get_faces_data(faces_paths, frame_path):
     return faces_data
 
 
+def save_face_data(data_path, faces_data):
+    with open(data_path, "w", encoding="utf-8") as f:
+        json.dump(faces_data, f, ensure_ascii=False, indent=4)
+
 def main():
     cap = initialize_camera()
     frame_count = 0
@@ -95,7 +123,7 @@ def main():
         frame_count += 1
 
         # Perform face detection every FRAME_SKIP frames
-        faces = detect_faces(frame) if frame_count % FRAME_SKIP == 0 else []
+        faces = detect_faces(frame, scale=SCALE_FACTOR) if frame_count % FRAME_SKIP == 0 else []
         draw_faces(frame, faces)
 
         cv2.imshow("DroidCam Feed", frame)
@@ -106,8 +134,9 @@ def main():
             faces_paths, frame_path = capture_photo(frame, faces, photo_count)
             faces_data = get_faces_data(faces_paths, frame_path)
 
-            with open(f"faces_data_{photo_count}.json", "w", encoding="utf-8") as f:
-                json.dump(faces_data, f, ensure_ascii=False, indent=4)
+            face_data_identifier = f"faces_data_{photo_count}.json"
+            face_data_path = os.path.join(DATA_PATH, face_data_identifier)
+            save_face_data(face_data_path, faces_data)
 
         elif key == ord('q'):  # Quit on 'q' key
             break
