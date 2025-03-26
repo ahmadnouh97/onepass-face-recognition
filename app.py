@@ -160,8 +160,8 @@ def show_familiar_face(face_data):
     img = cv2.imread(face_data["face_path"])
     if img is not None:
         cv2.imshow("Familiar Face", img)
-        cv2.waitKey(3000)  # Show for 3 seconds
-        cv2.destroyWindow("Familiar Face")
+        # cv2.waitKey(3000)  # Show for 3 seconds
+        # cv2.destroyWindow("Familiar Face")
 
 
 def main():
