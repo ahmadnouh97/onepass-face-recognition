@@ -1,6 +1,7 @@
 import os
 import cv2
 import json
+import uuid
 import winsound  # For sound on Windows
 from dotenv import load_dotenv
 from deepface import DeepFace
@@ -75,15 +76,18 @@ def capture_photo(frame, faces, photo_count):
         print("No faces detected.")
         return
     
-    frame_identifier = f"captured_photo_{photo_count}.jpg"
-    frame_path = os.path.join(IMAGES_PATH, frame_identifier)
+    # frame_identifier = f"captured_photo_{photo_count}.jpg"
+    frame_identifier = generate_identifier()
+    frame_name = f"{frame_identifier}.jpg"
+    frame_path = os.path.join(IMAGES_PATH, frame_name)
     cv2.imwrite(frame_path, frame)
 
     faces_paths = []
     for i, (x, y, w, h) in enumerate(faces):
         face_crop = frame[y:y + h, x:x + w]
-        face_identifier = f"captured_face_{photo_count}_{i}.jpg"
-        face_path = os.path.join(FACES_PATH, face_identifier)
+        face_identifier = f"{frame_identifier}_face_0{i}"
+        face_name = f"{face_identifier}.jpg"
+        face_path = os.path.join(FACES_PATH, face_name)
 
         cv2.imwrite(face_path, face_crop)
         print(f"Face captured and saved as '{face_path}'")
@@ -91,23 +95,29 @@ def capture_photo(frame, faces, photo_count):
     
     # Play sound feedback (Windows only)
     winsound.Beep(1000, 500)
-    return faces_paths, frame_path
+    return faces_paths, frame_path, frame_identifier
 
 
 def get_faces_data(faces_paths, frame_path):
-    faces_data = []
+    faces_data = dict()
     for face_file in faces_paths:
         results = DeepFace.represent(face_file, model_name="Facenet", enforce_detection=False)
         result = results[0]
-        result["face_path"] = face_file
         result["frame_path"] = frame_path
-        faces_data.append(result)
+        result["face_path"] = face_file
+        faces_data[face_file] = result        
+
     return faces_data
 
 
 def save_face_data(data_path, faces_data):
     with open(data_path, "w", encoding="utf-8") as f:
         json.dump(faces_data, f, ensure_ascii=False, indent=4)
+
+
+def generate_identifier():
+    return str(uuid.uuid4())
+
 
 def main():
     cap = initialize_camera()
@@ -131,12 +141,10 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord(' '):  # Capture photo on spacebar press
             photo_count += 1
-            faces_paths, frame_path = capture_photo(frame, faces, photo_count)
-            faces_data = get_faces_data(faces_paths, frame_path)
-
-            face_data_identifier = f"faces_data_{photo_count}.json"
-            face_data_path = os.path.join(DATA_PATH, face_data_identifier)
-            save_face_data(face_data_path, faces_data)
+            faces_paths, frame_path, frame_identifier = capture_photo(frame, faces, photo_count)
+            frame_faces_data = get_faces_data(faces_paths, frame_path)
+            frame_faces_data_path = os.path.join(DATA_PATH, f"{frame_identifier}_data.json")
+            save_face_data(frame_faces_data_path, frame_faces_data)
 
         elif key == ord('q'):  # Quit on 'q' key
             break
