@@ -50,15 +50,15 @@ def detect_faces(frame, scale=1):
 
         results = face_detection.process(rgb_frame)
 
-        faces = []
+        faces_boxes = []
         if results.detections:
             for detection in results.detections:
                 bboxC = detection.location_data.relative_bounding_box
                 h, w, _ = frame.shape
                 x, y, w, h = int(bboxC.xmin * w), int(bboxC.ymin * h), int(bboxC.width * w), int(bboxC.height * h)
-                faces.append((x, y, w, h))
+                faces_boxes.append((x, y, w, h))
 
-        return faces
+        return faces_boxes
     except Exception as e:
         print("Face detection error:", e)
         return []
@@ -133,18 +133,23 @@ def main():
         frame_count += 1
 
         # Perform face detection every FRAME_SKIP frames
-        faces = detect_faces(frame, scale=SCALE_FACTOR) if frame_count % FRAME_SKIP == 0 else []
-        draw_faces(frame, faces)
+        faces_boxes = detect_faces(frame, scale=SCALE_FACTOR) if frame_count % FRAME_SKIP == 0 else []
+        draw_faces(frame, faces_boxes)
 
         cv2.imshow("DroidCam Feed", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord(' '):  # Capture photo on spacebar press
             photo_count += 1
-            faces_paths, frame_path, frame_identifier = capture_photo(frame, faces, photo_count)
+            faces_paths, frame_path, frame_identifier = capture_photo(frame, faces_boxes, photo_count)
             frame_faces_data = get_faces_data(faces_paths, frame_path)
             frame_faces_data_path = os.path.join(DATA_PATH, f"{frame_identifier}_data.json")
             save_face_data(frame_faces_data_path, frame_faces_data)
+
+            #TODO:
+            # check if face is already in the familiar faces database
+            # 1. if not (new face), add it to the database
+            # 2. else, open the face photo of the familiar face and show it
 
         elif key == ord('q'):  # Quit on 'q' key
             break
