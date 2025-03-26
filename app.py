@@ -1,56 +1,97 @@
 import os
 import cv2
-# import winsound  # For sound on Windows
+import winsound  # For sound on Windows
 from dotenv import load_dotenv
+from deepface import DeepFace
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
+DROIDCAM_URL = os.environ.get("DROIDCAM_URL")
 
-# Replace with your DroidCam IP and port if using Wi-Fi
-DROIDCAM_URL = os.environ.get("DROIDCAM_URL")  # Update with your IP
+# Parameters for optimization
+SCALE_FACTOR = 0.5  # Downscale factor for detection
+FRAME_SKIP = 1      # Process face detection every N frames
 
-print(DROIDCAM_URL)
 
-# Initialize video capture
-cap = cv2.VideoCapture(DROIDCAM_URL)
+def initialize_camera():
+    """Initialize video capture."""
+    cap = cv2.VideoCapture(DROIDCAM_URL)
+    if not cap.isOpened():
+        print("Error: Could not open video stream")
+        exit()
+    return cap
 
-if not cap.isOpened():
-    print("Error: Could not open video stream")
-    exit()
 
-photo_count = 0  # Counter for unique photo filenames
+def detect_faces(frame):
+    """Detect faces in the downscaled frame and return bounding box coordinates."""
+    small_frame = cv2.resize(frame, (0, 0), fx=SCALE_FACTOR, fy=SCALE_FACTOR)
+    try:
+        faces = DeepFace.extract_faces(small_frame, detector_backend='opencv', enforce_detection=False)
+        return [
+            (
+                int(face["facial_area"]["x"] / SCALE_FACTOR),
+                int(face["facial_area"]["y"] / SCALE_FACTOR),
+                int(face["facial_area"]["w"] / SCALE_FACTOR),
+                int(face["facial_area"]["h"] / SCALE_FACTOR),
+            )
+            for face in faces
+        ]
+    except Exception as e:
+        print("Face detection error:", e)
+        return []
 
-while True:
-    ret, frame = cap.read()
 
-    if not ret:
-        print("Failed to grab frame")
-        break
+def draw_faces(frame, faces):
+    """Draw bounding boxes around detected faces."""
+    for (x, y, w, h) in faces:
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-    # Display the live feed
-    cv2.imshow("DroidCam Feed", frame)
 
-    # Wait for key press: spacebar captures the photo
-    key = cv2.waitKey(1) & 0xFF
+def capture_photo(frame, faces, photo_count):
+    """Capture and save each detected face as a separate image."""
+    if not faces:
+        print("No faces detected.")
+        return
+    
+    for i, (x, y, w, h) in enumerate(faces):
+        face_crop = frame[y:y + h, x:x + w]
+        photo_filename = f"captured_face_{photo_count}_{i}.jpg"
+        cv2.imwrite(photo_filename, face_crop)
+        print(f"Face captured and saved as '{photo_filename}'")
+    
+    # Play sound feedback (Windows only)
+    winsound.Beep(1000, 500)
 
-    if key == ord(' '):  # Spacebar to capture the photo
-        photo_count += 1  # Increment counter for each photo captured
-        photo_filename = f"captured_photo_{photo_count}.jpg"  # Unique filename for each photo
-        
-        # Save the photo
-        cv2.imwrite(photo_filename, frame)
-        print(f"Photo captured and saved as '{photo_filename}'")
 
-        # Display "Photo Captured!" on the screen for 2 seconds
-        cv2.putText(frame, "Photo Captured!", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+def main():
+    cap = initialize_camera()
+    frame_count = 0
+    photo_count = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
+
+        frame_count += 1
+
+        # Perform face detection every FRAME_SKIP frames
+        faces = detect_faces(frame) if frame_count % FRAME_SKIP == 0 else []
+        draw_faces(frame, faces)
+
         cv2.imshow("DroidCam Feed", frame)
-        cv2.waitKey(2000)  # Display the message for 2 seconds
 
-        # Play a sound for feedback (only works on Windows)
-        # winsound.Beep(1000, 500)  # Frequency, duration in milliseconds
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord(' '):  # Capture photo on spacebar press
+            photo_count += 1
+            capture_photo(frame, faces, photo_count)
+        elif key == ord('q'):  # Quit on 'q' key
+            break
 
-    elif key == ord('q'):  # Press 'q' to quit
-        break
+    cap.release()
+    cv2.destroyAllWindows()
 
-cap.release()
-cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
