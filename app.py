@@ -158,13 +158,14 @@ def find_similar_face(new_face_data, familiar_faces, threshold=0.6):
     return None, None
 
 
-def show_familiar_face(face_data):
-    """Display the familiar face image."""
+def show_familiar_face(face_data, window_id):
+    """Display the familiar face image with a unique window ID."""
     img = cv2.imread(face_data["face_path"])
     if img is not None:
-        cv2.imshow("Familiar Face", img)
-        # cv2.waitKey(3000)  # Show for 3 seconds
-        # cv2.destroyWindow("Familiar Face")
+        window_name = f"Familiar Face {window_id}"
+        cv2.imshow(window_name, img)
+        # Optional: resize window if needed
+        # cv2.resizeWindow(window_name, width, height)
 
 
 def main():
@@ -196,11 +197,13 @@ def main():
             save_face_data(frame_faces_data_path, frame_faces_data)
 
             # Check each new face against familiar faces
+            match_counter = 0
             for face_path, face_data in frame_faces_data.items():
                 known_face_path, known_face_data = find_similar_face(face_data, familiar_faces)
                 if known_face_path:
                     print("This face is familiar!")
-                    show_familiar_face(known_face_data)
+                    match_counter += 1
+                    show_familiar_face(known_face_data, match_counter)
                 else:
                     print("New face detected - adding to unique faces database")
                     # Save to unique faces folder
