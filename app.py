@@ -2,11 +2,11 @@ import os
 import cv2
 import json
 import uuid
-import winsound  # For sound on Windows
+import winsound
 from dotenv import load_dotenv
 from deepface import DeepFace
 import mediapipe as mp
-
+import shutil
 
 # Load environment variables
 load_dotenv()
@@ -24,9 +24,12 @@ FRAME_SKIP = 1      # Process face detection every N frames
 IMAGES_PATH = os.path.join(os.path.dirname(__file__), "db", "images")
 FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "faces")
 DATA_PATH = os.path.join(os.path.dirname(__file__), "db", "data")
+UNIQUE_FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "unique_faces")
 
 os.makedirs(IMAGES_PATH, exist_ok=True)
 os.makedirs(FACES_PATH, exist_ok=True)
+os.makedirs(DATA_PATH, exist_ok=True)
+os.makedirs(UNIQUE_FACES_PATH, exist_ok=True)
 
 
 def initialize_camera():
@@ -199,12 +202,22 @@ def main():
                     print("This face is familiar!")
                     show_familiar_face(known_face_data)
                 else:
-                    print("New face detected - adding to database")
-                    familiar_faces[face_path] = face_data  # Add to in-memory database
+                    print("New face detected - adding to unique faces database")
+                    # Save to unique faces folder
+                    unique_face_filename = os.path.basename(face_path)
+                    unique_face_path = os.path.join(UNIQUE_FACES_PATH, unique_face_filename)
+                    shutil.copy2(face_path, unique_face_path)
+                    print(f"Saved unique face to: {unique_face_path}")
+                    
+                    # Add to in-memory database
+                    face_data["unique_face_path"] = unique_face_path
+                    familiar_faces[unique_face_path] = face_data
 
         elif key == ord('q'):  # Quit on 'q' key
             break
 
+    cap.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
