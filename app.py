@@ -3,6 +3,7 @@ import cv2
 import json
 import uuid
 import winsound
+import numpy as np
 from dotenv import load_dotenv
 from deepface import DeepFace
 import mediapipe as mp
@@ -79,7 +80,6 @@ def capture_photo(frame, faces, photo_count):
         print("No faces detected.")
         return
     
-    # frame_identifier = f"captured_photo_{photo_count}.jpg"
     frame_identifier = generate_identifier()
     frame_name = f"{frame_identifier}.jpg"
     frame_path = os.path.join(IMAGES_PATH, frame_name)
@@ -121,6 +121,7 @@ def save_face_data(data_path, faces_data):
 def generate_identifier():
     return str(uuid.uuid4())
 
+
 def get_familiar_faces_data():
     """Load all familiar faces data from the database."""
     familiar_faces = {}
@@ -158,14 +159,71 @@ def find_similar_face(new_face_data, familiar_faces, threshold=0.6):
     return None, None
 
 
-def show_familiar_face(face_data, window_id):
-    """Display the familiar face image with a unique window ID."""
-    img = cv2.imread(face_data["face_path"])
-    if img is not None:
-        window_name = f"Familiar Face {window_id}"
-        cv2.imshow(window_name, img)
-        # Optional: resize window if needed
-        # cv2.resizeWindow(window_name, width, height)
+def show_familiar_faces_grid(familiar_faces_list):
+    """Display all familiar faces in a grid layout."""
+    if not familiar_faces_list:
+        return
+    
+    # Calculate grid dimensions
+    num_faces = len(familiar_faces_list)
+    cols = int(num_faces ** 0.5) + 1
+    rows = (num_faces + cols - 1) // cols
+    
+    # Load all face images and find maximum dimensions
+    face_images = []
+    max_width, max_height = 0, 0
+    for face_data in familiar_faces_list:
+        img = cv2.imread(face_data["face_path"])
+        if img is not None:
+            face_images.append(img)
+            h, w = img.shape[:2]
+            max_width = max(max_width, w)
+            max_height = max(max_height, h)
+    
+    if not face_images:
+        return
+    
+    # Add 10% padding between images
+    padding = int(max_height * 0.1)
+    cell_width = max_width + padding
+    cell_height = max_height + padding
+    
+    # Create blank canvas with gray background
+    grid_width = cols * cell_width + padding
+    grid_height = rows * cell_height + padding
+    grid = np.full((grid_height, grid_width, 3), 200, dtype=np.uint8)  # Gray background
+    
+    # Arrange faces in grid with padding
+    for i, img in enumerate(face_images):
+        row = i // cols
+        col = i % cols
+        y_start = row * cell_height + padding
+        x_start = col * cell_width + padding
+        h, w = img.shape[:2]
+        
+        # Center the image in its cell
+        y_offset = (cell_height - h - padding) // 2
+        x_offset = (cell_width - w - padding) // 2
+        
+        grid[y_start+y_offset:y_start+y_offset+h, 
+             x_start+x_offset:x_start+x_offset+w] = img
+    
+    # Add title
+    cv2.putText(grid, f"Familiar Faces ({num_faces} matches)", 
+               (padding, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+               0.7, (0, 0, 0), 2)
+    
+    # Add grid borders
+    for r in range(rows+1):
+        cv2.line(grid, (0, r*cell_height), 
+                (grid_width, r*cell_height), 
+                (150, 150, 150), 1)
+    for c in range(cols+1):
+        cv2.line(grid, (c*cell_width, 0), 
+                (c*cell_width, grid_height), 
+                (150, 150, 150), 1)
+    
+    cv2.imshow("Familiar Faces Grid", grid)
 
 
 def main():
@@ -197,22 +255,25 @@ def main():
             save_face_data(frame_faces_data_path, frame_faces_data)
 
             # Check each new face against familiar faces
-            match_counter = 0
+            matching_faces = []
             for face_path, face_data in frame_faces_data.items():
                 known_face_path, known_face_data = find_similar_face(face_data, familiar_faces)
                 if known_face_path:
-                    print("This face is familiar!")
-                    match_counter += 1
-                    show_familiar_face(known_face_data, match_counter)
-                else:
-                    print("New face detected - adding to unique faces database")
-                    # Save to unique faces folder
+                    print(f"Found familiar face: {known_face_path}")
+                    matching_faces.append(known_face_data)
+            
+            # Show matches in grid view
+            if matching_faces:
+                show_familiar_faces_grid(matching_faces)
+            else:
+                print("No familiar faces found in this capture")
+                
+            # For new faces, add to unique collection
+            for face_path, face_data in frame_faces_data.items():
+                if face_path not in [f["face_path"] for f in matching_faces]:
                     unique_face_filename = os.path.basename(face_path)
                     unique_face_path = os.path.join(UNIQUE_FACES_PATH, unique_face_filename)
                     shutil.copy2(face_path, unique_face_path)
-                    print(f"Saved unique face to: {unique_face_path}")
-                    
-                    # Add to in-memory database
                     face_data["unique_face_path"] = unique_face_path
                     familiar_faces[unique_face_path] = face_data
 
