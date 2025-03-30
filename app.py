@@ -16,6 +16,7 @@ mp_drawing = mp.solutions.drawing_utils
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
 
 DROIDCAM_URL = os.environ.get("DROIDCAM_URL")
+print(f"DROIDCAM_URL = {DROIDCAM_URL}")
 
 # Parameters for optimization
 SCALE_FACTOR = 1    # Downscale factor for detection
@@ -34,8 +35,7 @@ os.makedirs(UNIQUE_FACES_PATH, exist_ok=True)
 
 def initialize_camera():
     """Initialize video capture."""
-    # cap = cv2.VideoCapture(DROIDCAM_URL)
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(DROIDCAM_URL) if DROIDCAM_URL else cv2.VideoCapture(0)
 
     if not cap.isOpened():
         print("Error: Could not open video stream")
