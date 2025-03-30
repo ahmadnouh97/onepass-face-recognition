@@ -3,228 +3,472 @@ import cv2
 import json
 import uuid
 import winsound
+import shutil
 from dotenv import load_dotenv
 from deepface import DeepFace
 import mediapipe as mp
-import shutil
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
+                            QPushButton, QWidget, QLabel, QScrollArea, QGroupBox,
+                            QFileDialog, QMessageBox)
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtWidgets import QSizePolicy
 
 # Load environment variables
 load_dotenv()
 
 mp_face_detection = mp.solutions.face_detection
-mp_drawing = mp.solutions.drawing_utils
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
 
-DROIDCAM_URL = os.environ.get("DROIDCAM_URL")
-print(f"DROIDCAM_URL = {DROIDCAM_URL}")
+class FaceRecognitionApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Face Recognition System")
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # Initialize paths
+        self.initialize_paths()
+        
+        # UI Components
+        self.init_ui()
+        
+        # Camera setup
+        self.cap = None
+        self.frame_count = 0
+        self.familiar_faces = self.get_familiar_faces_data()
+        
+        # Start camera
+        self.initialize_camera()
+        
+        # Timer for video feed
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_frame)
+        self.timer.start(30)  # ~30 FPS
+        
+        # Track currently displayed familiar faces
+        self.current_matches = {}
+        self.next_window_id = 1
 
-# Parameters for optimization
-SCALE_FACTOR = 1    # Downscale factor for detection
-FRAME_SKIP = 1      # Process face detection every N frames
+    def initialize_paths(self):
+        """Initialize all required directories."""
+        self.IMAGES_PATH = os.path.join(os.path.dirname(__file__), "db", "images")
+        self.FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "faces")
+        self.DATA_PATH = os.path.join(os.path.dirname(__file__), "db", "data")
+        self.UNIQUE_FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "unique_faces")
 
-IMAGES_PATH = os.path.join(os.path.dirname(__file__), "db", "images")
-FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "faces")
-DATA_PATH = os.path.join(os.path.dirname(__file__), "db", "data")
-UNIQUE_FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "unique_faces")
+        os.makedirs(self.IMAGES_PATH, exist_ok=True)
+        os.makedirs(self.FACES_PATH, exist_ok=True)
+        os.makedirs(self.DATA_PATH, exist_ok=True)
+        os.makedirs(self.UNIQUE_FACES_PATH, exist_ok=True)
 
-os.makedirs(IMAGES_PATH, exist_ok=True)
-os.makedirs(FACES_PATH, exist_ok=True)
-os.makedirs(DATA_PATH, exist_ok=True)
-os.makedirs(UNIQUE_FACES_PATH, exist_ok=True)
+    # def set_high_quality_mode(self, enable=True):
+    #     """Enable high quality mode with tradeoffs."""
+    #     if enable:
+    #         # Higher resolution but may reduce FPS
+    #         self.timer.setInterval(50)  # ~20 FPS instead of 30
+    #         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+    #     else:
+    #         # Balanced mode
+    #         self.timer.setInterval(30)  # ~30 FPS
+    #         self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'YUYV'))
 
+    def init_ui(self):
+        """Initialize the main UI components."""
+        main_widget = QWidget()
+        main_layout = QHBoxLayout()
+        
+        # Left panel - Camera feed and controls
+        left_panel = QVBoxLayout()
+        
+        # Camera feed
+        self.camera_label = QLabel()
+        self.camera_label.setAlignment(Qt.AlignCenter)
+        self.camera_label.setMinimumSize(800, 600)  # Increased minimum size
+        self.camera_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        left_panel.addWidget(self.camera_label)
+        
+        # Controls
+        control_group = QGroupBox("Controls")
+        control_layout = QVBoxLayout()
 
-def initialize_camera(index=0):
-    """Initialize video capture."""
-    cap = None
-    if index > 1:
-        cap = cv2.VideoCapture(DROIDCAM_URL)
-    else:
-        cap = cv2.VideoCapture(index)
+        # self.quality_btn = QPushButton("Toggle High Quality")
+        # self.quality_btn.setCheckable(True)
+        # self.quality_btn.toggled.connect(self.set_high_quality_mode)
+        # control_layout.addWidget(self.quality_btn)
+        
+        self.capture_btn = QPushButton("Capture Faces (Space)")
+        self.capture_btn.clicked.connect(self.capture_faces)
+        control_layout.addWidget(self.capture_btn)
+        
+        # self.add_face_btn = QPushButton("Add Face to Database")
+        # self.add_face_btn.clicked.connect(self.add_face_to_database)
+        # control_layout.addWidget(self.add_face_btn)
+        
+        self.view_database_btn = QPushButton("View Database")
+        self.view_database_btn.clicked.connect(self.view_database)
+        control_layout.addWidget(self.view_database_btn)
+        
+        control_group.setLayout(control_layout)
+        left_panel.addWidget(control_group)
+        
+        # Right panel - Detected faces and matches
+        right_panel = QVBoxLayout()
+        
+        # Detected faces
+        self.detected_faces_group = QGroupBox("Detected Faces")
+        self.detected_faces_layout = QHBoxLayout()
+        self.detected_faces_group.setLayout(self.detected_faces_layout)
+        right_panel.addWidget(self.detected_faces_group)
+        
+        # Matches
+        self.matches_group = QGroupBox("Recognized Faces")
+        self.matches_layout = QHBoxLayout()
+        self.matches_group.setLayout(self.matches_layout)
+        right_panel.addWidget(self.matches_group)
+        
+        # Status
+        self.status_label = QLabel("Ready")
+        right_panel.addWidget(self.status_label)
+        
+        # Add panels to main layout
+        main_layout.addLayout(left_panel, 60)
+        main_layout.addLayout(right_panel, 40)
+        
+        main_widget.setLayout(main_layout)
+        self.setCentralWidget(main_widget)
+        
+        # Set styles
+        self.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid gray;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 15px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px;
+            }
+            QPushButton {
+                padding: 8px;
+                font-weight: bold;
+            }
+            QLabel {
+                font-size: 14px;
+            }
+        """)
 
-    if not cap.isOpened():
-        print("Error: Could not open video stream")
-        exit()
-    return cap
-
-
-def detect_faces(frame, scale=1):
-    """Detect faces in the downscaled frame and return bounding box coordinates."""
-    try:
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        if scale < 1:
-            rgb_frame = cv2.resize(rgb_frame, (0, 0), fx=SCALE_FACTOR, fy=SCALE_FACTOR)
-
-        results = face_detection.process(rgb_frame)
-
-        faces_boxes = []
-        if results.detections:
-            for detection in results.detections:
-                bboxC = detection.location_data.relative_bounding_box
-                h, w, _ = frame.shape
-                x, y, w, h = int(bboxC.xmin * w), int(bboxC.ymin * h), int(bboxC.width * w), int(bboxC.height * h)
-                faces_boxes.append((x, y, w, h))
-
-        return faces_boxes
-    except Exception as e:
-        print("Face detection error:", e)
-        return []
-
-
-def draw_faces(frame, faces):
-    """Draw bounding boxes around detected faces."""
-    for (x, y, w, h) in faces:
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-
-def capture_photo(frame, faces, photo_count):
-    """Capture and save each detected face as a separate image."""
-    if not faces:
-        print("No faces detected.")
-        return
-    
-    # frame_identifier = f"captured_photo_{photo_count}.jpg"
-    frame_identifier = generate_identifier()
-    frame_name = f"{frame_identifier}.jpg"
-    frame_path = os.path.join(IMAGES_PATH, frame_name)
-    cv2.imwrite(frame_path, frame)
-
-    faces_paths = []
-    for i, (x, y, w, h) in enumerate(faces):
-        face_crop = frame[y:y + h, x:x + w]
-        face_identifier = f"{frame_identifier}_face_0{i}"
-        face_name = f"{face_identifier}.jpg"
-        face_path = os.path.join(FACES_PATH, face_name)
-
-        cv2.imwrite(face_path, face_crop)
-        print(f"Face captured and saved as '{face_path}'")
-        faces_paths.append(face_path)
-    
-    # Play sound feedback (Windows only)
-    winsound.Beep(1000, 500)
-    return faces_paths, frame_path, frame_identifier
-
-
-def get_faces_data(faces_paths, frame_path):
-    faces_data = dict()
-    for face_file in faces_paths:
-        results = DeepFace.represent(face_file, model_name="Facenet512", enforce_detection=False)
-        result = results[0]
-        result["frame_path"] = frame_path
-        result["face_path"] = face_file
-        faces_data[face_file] = result        
-
-    return faces_data
-
-
-def save_face_data(data_path, faces_data):
-    with open(data_path, "w", encoding="utf-8") as f:
-        json.dump(faces_data, f, ensure_ascii=False, indent=4)
-
-
-def generate_identifier():
-    return str(uuid.uuid4())
-
-def get_familiar_faces_data():
-    """Load all familiar faces data from the database."""
-    familiar_faces = {}
-    if not os.path.exists(DATA_PATH):
-        os.makedirs(DATA_PATH, exist_ok=True)
-        return familiar_faces
-    
-    for file in os.listdir(DATA_PATH):
-        if file.endswith("_data.json"):
-            with open(os.path.join(DATA_PATH, file), "r", encoding="utf-8") as f:
-                data = json.load(f)
-                for face_path, face_data in data.items():
-                    familiar_faces[face_path] = face_data
-    return familiar_faces
-
-
-def find_similar_face(new_face_data, familiar_faces, threshold=0.6):
-    """Check if the new face matches any familiar face using distance threshold."""
-    for known_face_path, known_face_data in familiar_faces.items():
-        try:
-            # Compare using the embeddings
-            distance = DeepFace.verify(
-                img1_path=new_face_data["face_path"],
-                img2_path=known_face_path,
-                model_name="Facenet512",
-                distance_metric="cosine",
-                enforce_detection=False
-            )["distance"]
+    def initialize_camera(self, index=0):
+        """Initialize video capture with high resolution."""
+        if self.cap is not None:
+            self.cap.release()
             
-            if distance < threshold:
-                print(f"Similar face found: {known_face_path}: ({distance:.4f})")
-                return known_face_path, known_face_data
-        except Exception as e:
-            print(f"Error comparing faces: {e}")
-    return None, None
+        self.cap = cv2.VideoCapture(index)
+        
+        # Set to highest possible resolution
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)  # Try max width
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)  # Try max height
+        
+        # Alternatively, let OpenCV choose the maximum supported resolution
+        # self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        # self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        if not self.cap.isOpened():
+            QMessageBox.critical(self, "Error", "Could not open video stream")
+            self.close()
+        else:
+            # Print actual resolution being used
+            width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            self.status_label.setText(f"Camera initialized at {width}x{height}")
 
-
-def show_familiar_face(face_data, window_id):
-    """Display the familiar face image with a unique window ID."""
-    img = cv2.imread(face_data["face_path"])
-    if img is not None:
-        window_name = f"Familiar Face {window_id}"
-        cv2.imshow(window_name, img)
-        # Optional: resize window if needed
-        # cv2.resizeWindow(window_name, width, height)
-
-
-def main():
-    cap = initialize_camera(index=0) # 0 for built-in camera, 1 for USB camera, 2 or higher for DroidCam
-    frame_count = 0
-    photo_count = 0
-    familiar_faces = get_familiar_faces_data()  # Load familiar faces at startup
-
-    while True:
-        ret, frame = cap.read()
+    def update_frame(self):
+        """Update the camera feed with high quality."""
+        ret, frame = self.cap.read()
         if not ret:
-            print("Failed to grab frame")
-            break
-
-        frame_count += 1
-
+            self.status_label.setText("Failed to grab frame")
+            return
+            
+        self.frame_count += 1
+        
         # Perform face detection every FRAME_SKIP frames
-        faces_boxes = detect_faces(frame, scale=SCALE_FACTOR) if frame_count % FRAME_SKIP == 0 else []
-        draw_faces(frame, faces_boxes)
+        if self.frame_count % 1 == 0:
+            self.faces_boxes = self.detect_faces(frame)
+            self.draw_faces(frame, self.faces_boxes)
+        
+        # Convert to QImage without quality loss
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame.shape
+        bytes_per_line = ch * w
+        q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        
+        # Scale the pixmap to fit the label while maintaining aspect ratio
+        pixmap = QPixmap.fromImage(q_img)
+        self.camera_label.setPixmap(pixmap.scaled(
+            self.camera_label.width(), 
+            self.camera_label.height(), 
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation  # Use smooth scaling
+        ))
 
-        cv2.imshow("DroidCam Feed", frame)
+    def detect_faces(self, frame, scale=1):
+        """Detect faces in the frame."""
+        try:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_detection.process(rgb_frame)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord(' '):  # Capture photo on spacebar press
-            photo_count += 1
-            faces_paths, frame_path, frame_identifier = capture_photo(frame, faces_boxes, photo_count)
-            frame_faces_data = get_faces_data(faces_paths, frame_path)
-            frame_faces_data_path = os.path.join(DATA_PATH, f"{frame_identifier}_data.json")
-            save_face_data(frame_faces_data_path, frame_faces_data)
+            faces_boxes = []
+            if results.detections:
+                for detection in results.detections:
+                    bboxC = detection.location_data.relative_bounding_box
+                    h, w, _ = frame.shape
+                    x = int(bboxC.xmin * w)
+                    y = int(bboxC.ymin * h)
+                    w = int(bboxC.width * w)
+                    h = int(bboxC.height * h)
+                    faces_boxes.append((x, y, w, h))
 
-            # Check each new face against familiar faces
-            match_counter = 0
-            for face_path, face_data in frame_faces_data.items():
-                known_face_path, known_face_data = find_similar_face(face_data, familiar_faces)
-                if known_face_path:
-                    print("This face is familiar!")
-                    match_counter += 1
-                    show_familiar_face(known_face_data, match_counter)
-                else:
-                    print("New face detected - adding to unique faces database")
-                    # Save to unique faces folder
-                    unique_face_filename = os.path.basename(face_path)
-                    unique_face_path = os.path.join(UNIQUE_FACES_PATH, unique_face_filename)
-                    shutil.copy2(face_path, unique_face_path)
-                    print(f"Saved unique face to: {unique_face_path}")
-                    
-                    # Add to in-memory database
-                    face_data["unique_face_path"] = unique_face_path
-                    familiar_faces[unique_face_path] = face_data
+            return faces_boxes
+        except Exception as e:
+            self.status_label.setText(f"Detection error: {str(e)}")
+            return []
 
-        elif key == ord('q'):  # Quit on 'q' key
-            break
+    def draw_faces(self, frame, faces):
+        """Draw bounding boxes around detected faces."""
+        for (x, y, w, h) in faces:
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-    cap.release()
-    cv2.destroyAllWindows()
+    def capture_faces(self):
+        """Capture and process detected faces."""
+        if not hasattr(self, 'faces_boxes') or not self.faces_boxes:
+            self.status_label.setText("No faces detected to capture")
+            return
+            
+        ret, frame = self.cap.read()
+        if not ret:
+            self.status_label.setText("Failed to grab frame for capture")
+            return
+            
+        frame_identifier = str(uuid.uuid4())
+        frame_name = f"{frame_identifier}.jpg"
+        frame_path = os.path.join(self.IMAGES_PATH, frame_name)
+        cv2.imwrite(frame_path, frame)
+
+        faces_paths = []
+        for i, (x, y, w, h) in enumerate(self.faces_boxes):
+            face_crop = frame[y:y + h, x:x + w]
+            face_identifier = f"{frame_identifier}_face_0{i}"
+            face_name = f"{face_identifier}.jpg"
+            face_path = os.path.join(self.FACES_PATH, face_name)
+
+            cv2.imwrite(face_path, face_crop)
+            faces_paths.append(face_path)
+        
+        # Update UI with captured faces
+        self.show_detected_faces(faces_paths)
+        
+        # Play sound feedback
+        winsound.Beep(1000, 500)
+        
+        # Process face data
+        frame_faces_data = self.get_faces_data(faces_paths, frame_path)
+        frame_faces_data_path = os.path.join(self.DATA_PATH, f"{frame_identifier}_data.json")
+        self.save_face_data(frame_faces_data_path, frame_faces_data)
+
+        # Check for matches
+        self.check_for_matches(frame_faces_data)
+
+    def show_detected_faces(self, faces_paths):
+        """Display the detected faces in the UI."""
+        # Clear previous faces
+        for i in reversed(range(self.detected_faces_layout.count())): 
+            self.detected_faces_layout.itemAt(i).widget().setParent(None)
+            
+        # Add new faces
+        for face_path in faces_paths:
+            face_label = QLabel()
+            face_label.setAlignment(Qt.AlignCenter)
+            face_label.setFixedSize(150, 150)
+            
+            pixmap = QPixmap(face_path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                face_label.setPixmap(pixmap)
+                self.detected_faces_layout.addWidget(face_label)
+
+    def check_for_matches(self, frame_faces_data):
+        """Check if any faces match known faces."""
+        # Clear previous matches
+        for i in reversed(range(self.matches_layout.count())): 
+            self.matches_layout.itemAt(i).widget().setParent(None)
+            
+        match_counter = 0
+        for face_path, face_data in frame_faces_data.items():
+            known_face_path, known_face_data = self.find_similar_face(face_data, self.familiar_faces)
+            
+            if known_face_path:
+                match_counter += 1
+                self.show_match(known_face_data, match_counter)
+                self.status_label.setText(f"Match found! ({match_counter} faces recognized)")
+            else:
+                # Add to unique faces
+                unique_face_filename = os.path.basename(face_path)
+                unique_face_path = os.path.join(self.UNIQUE_FACES_PATH, unique_face_filename)
+                shutil.copy2(face_path, unique_face_path)
+                
+                # Add to in-memory database
+                face_data["unique_face_path"] = unique_face_path
+                self.familiar_faces[unique_face_path] = face_data
+                self.status_label.setText("New faces added to database")
+
+    def show_match(self, face_data, match_id):
+        """Display a matched face in the UI."""
+        match_label = QLabel()
+        match_label.setAlignment(Qt.AlignCenter)
+        match_label.setFixedSize(150, 150)
+        
+        pixmap = QPixmap(face_data["face_path"])
+        if not pixmap.isNull():
+            pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            match_label.setPixmap(pixmap)
+            self.matches_layout.addWidget(match_label)
+
+    def get_faces_data(self, faces_paths, frame_path):
+        faces_data = dict()
+        for face_file in faces_paths:
+            try:
+                results = DeepFace.represent(face_file, model_name="Facenet512", enforce_detection=False)
+                result = results[0]
+                result["frame_path"] = frame_path
+                result["face_path"] = face_file
+                faces_data[face_file] = result        
+            except Exception as e:
+                self.status_label.setText(f"Error processing face: {str(e)}")
+        return faces_data
+
+    def save_face_data(self, data_path, faces_data):
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump(faces_data, f, ensure_ascii=False, indent=4)
+
+    def get_familiar_faces_data(self):
+        """Load all familiar faces data from the database."""
+        familiar_faces = {}
+        if not os.path.exists(self.DATA_PATH):
+            return familiar_faces
+        
+        for file in os.listdir(self.DATA_PATH):
+            if file.endswith("_data.json"):
+                try:
+                    with open(os.path.join(self.DATA_PATH, file), "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        for face_path, face_data in data.items():
+                            familiar_faces[face_path] = face_data
+                except Exception as e:
+                    self.status_label.setText(f"Error loading face data: {str(e)}")
+        return familiar_faces
+
+    def find_similar_face(self, new_face_data, familiar_faces, threshold=0.6):
+        """Check if the new face matches any familiar face."""
+        for known_face_path, known_face_data in familiar_faces.items():
+            try:
+                distance = DeepFace.verify(
+                    img1_path=new_face_data["face_path"],
+                    img2_path=known_face_path,
+                    model_name="Facenet512",
+                    distance_metric="cosine",
+                    enforce_detection=False
+                )["distance"]
+                
+                if distance < threshold:
+                    return known_face_path, known_face_data
+            except Exception as e:
+                self.status_label.setText(f"Comparison error: {str(e)}")
+        return None, None
+
+    def add_face_to_database(self):
+        """Manual method to add a face to the database."""
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Face Image", "", "Images (*.png *.jpg *.jpeg)", options=options)
+            
+        if file_path:
+            try:
+                # Copy to faces directory
+                face_name = f"manual_{str(uuid.uuid4())}.jpg"
+                face_path = os.path.join(self.FACES_PATH, face_name)
+                shutil.copy2(file_path, face_path)
+                
+                # Create face data
+                frame_name = f"manual_{str(uuid.uuid4())}.jpg"
+                frame_path = os.path.join(self.IMAGES_PATH, frame_name)
+                cv2.imwrite(frame_path, cv2.imread(file_path))
+                
+                face_data = self.get_faces_data([face_path], frame_path)
+                data_path = os.path.join(self.DATA_PATH, f"manual_{str(uuid.uuid4())}_data.json")
+                self.save_face_data(data_path, face_data)
+                
+                # Add to in-memory database
+                self.familiar_faces.update(face_data)
+                self.status_label.setText("Face added to database successfully")
+                
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to add face: {str(e)}")
+
+    def view_database(self):
+        """Show all faces in the database."""
+        db_window = QMainWindow(self)
+        db_window.setWindowTitle("Face Database")
+        db_window.setGeometry(200, 200, 800, 600)
+        
+        scroll = QScrollArea()
+        widget = QWidget()
+        layout = QVBoxLayout()
+        
+        if not self.familiar_faces:
+            label = QLabel("Database is empty")
+            label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(label)
+        else:
+            for face_path, face_data in self.familiar_faces.items():
+                group = QGroupBox(os.path.basename(face_path))
+                hbox = QHBoxLayout()
+                
+                # Face image
+                face_label = QLabel()
+                face_label.setFixedSize(150, 150)
+                pixmap = QPixmap(face_path)
+                if not pixmap.isNull():
+                    pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    face_label.setPixmap(pixmap)
+                
+                # Face info
+                info_label = QLabel()
+                info_label.setText(f"""
+                    <b>Path:</b> {face_path}<br>
+                    <b>Embedding:</b> {len(face_data.get('embedding', []))} dimensions
+                """)
+                
+                hbox.addWidget(face_label)
+                hbox.addWidget(info_label)
+                group.setLayout(hbox)
+                layout.addWidget(group)
+        
+        widget.setLayout(layout)
+        scroll.setWidget(widget)
+        scroll.setWidgetResizable(True)
+        db_window.setCentralWidget(scroll)
+        db_window.show()
+
+    def closeEvent(self, event):
+        """Clean up when closing the application."""
+        if self.cap is not None:
+            self.cap.release()
+        self.timer.stop()
+        event.accept()
 
 if __name__ == "__main__":
-    main()
+    app = QApplication([])
+    window = FaceRecognitionApp()
+    window.show()
+    app.exec_()
