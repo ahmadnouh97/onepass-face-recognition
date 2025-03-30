@@ -49,6 +49,8 @@ class FaceRecognitionApp(QMainWindow):
         self.current_matches = {}
         self.next_window_id = 1
 
+        self.db_window = None
+
     def initialize_paths(self):
         """Initialize all required directories."""
         self.IMAGES_PATH = os.path.join(os.path.dirname(__file__), "db", "images")
@@ -416,49 +418,128 @@ class FaceRecognitionApp(QMainWindow):
                 QMessageBox.warning(self, "Error", f"Failed to add face: {str(e)}")
 
     def view_database(self):
-        """Show all faces in the database."""
-        db_window = QMainWindow(self)
-        db_window.setWindowTitle("Face Database")
-        db_window.setGeometry(200, 200, 800, 600)
+        """Show only unique faces from the unique_faces directory."""
+        # Close existing window if open
+        if self.db_window is not None:
+            self.db_window.close()
+        
+        # Create new window
+        self.db_window = QMainWindow(self)
+        self.db_window.setWindowTitle("Unique Faces Database")
+        self.db_window.setGeometry(200, 200, 800, 600)
         
         scroll = QScrollArea()
         widget = QWidget()
         layout = QVBoxLayout()
         
-        if not self.familiar_faces:
-            label = QLabel("Database is empty")
+        # Get all unique face files
+        unique_faces = [f for f in os.listdir(self.UNIQUE_FACES_PATH) 
+                    if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        
+        if not unique_faces:
+            label = QLabel("No unique faces in database")
             label.setAlignment(Qt.AlignCenter)
             layout.addWidget(label)
         else:
-            for face_path, face_data in self.familiar_faces.items():
-                group = QGroupBox(os.path.basename(face_path))
+            # Sort faces by filename
+            unique_faces.sort()
+            
+            for face_file in unique_faces:
+                group = QGroupBox(face_file)
                 hbox = QHBoxLayout()
                 
                 # Face image
+                face_path = os.path.join(self.UNIQUE_FACES_PATH, face_file)
                 face_label = QLabel()
                 face_label.setFixedSize(150, 150)
                 pixmap = QPixmap(face_path)
+                
                 if not pixmap.isNull():
                     pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     face_label.setPixmap(pixmap)
                 
-                # Face info
+                # Face info (try to get additional data from familiar_faces)
                 info_label = QLabel()
-                info_label.setText(f"""
-                    <b>Path:</b> {face_path}<br>
-                    <b>Embedding:</b> {len(face_data.get('embedding', []))} dimensions
-                """)
+                face_data = None
+                
+                # Find matching data in familiar_faces
+                for known_path, data in self.familiar_faces.items():
+                    if os.path.basename(known_path) == face_file:
+                        face_data = data
+                        break
+                
+                info_text = f"<b>File:</b> {face_file}<br>"
+                if face_data:
+                    info_text += f"<b>First seen:</b> {os.path.basename(face_data.get('frame_path', 'unknown'))}<br>"
+                    info_text += f"<b>Embedding:</b> {len(face_data.get('embedding', []))} dimensions"
+                
+                info_label.setText(info_text)
+                
+                # Delete button
+                delete_btn = QPushButton("Delete")
+                delete_btn.setFixedSize(80, 30)
+                delete_btn.clicked.connect(lambda _, p=face_path: self.delete_face(p))
                 
                 hbox.addWidget(face_label)
                 hbox.addWidget(info_label)
+                hbox.addWidget(delete_btn)
                 group.setLayout(hbox)
                 layout.addWidget(group)
         
         widget.setLayout(layout)
         scroll.setWidget(widget)
         scroll.setWidgetResizable(True)
-        db_window.setCentralWidget(scroll)
-        db_window.show()
+
+        self.db_window.setCentralWidget(scroll)
+        self.db_window.show()
+
+    def delete_face(self, face_path):
+        """Delete a face from the unique faces database."""
+        reply = QMessageBox.question(
+            self, 'Delete Face', 
+            f"Are you sure you want to delete {os.path.basename(face_path)}?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            try:
+                # Remove from filesystem
+                os.remove(face_path)
+                
+                # Remove from familiar_faces dictionary
+                for path in list(self.familiar_faces.keys()):
+                    if os.path.basename(path) == os.path.basename(face_path):
+                        del self.familiar_faces[path]
+                
+                # Remove corresponding data file
+                data_files = [f for f in os.listdir(self.DATA_PATH) 
+                            if f.endswith('_data.json')]
+                
+                for data_file in data_files:
+                    data_path = os.path.join(self.DATA_PATH, data_file)
+                    with open(data_path, 'r') as f:
+                        data = json.load(f)
+                    
+                    # Check if this face is referenced in the data file
+                    updated_data = {k:v for k,v in data.items() 
+                                if os.path.basename(k) != os.path.basename(face_path)}
+                    
+                    # Save back if we removed something
+                    if len(updated_data) < len(data):
+                        if updated_data:
+                            with open(data_path, 'w') as f:
+                                json.dump(updated_data, f, indent=4)
+                        else:
+                            os.remove(data_path)
+                
+                QMessageBox.information(self, 'Success', 'Face deleted successfully')
+                
+                # Refresh the existing window instead of creating new one
+                if self.db_window is not None:
+                    self.db_window.close()
+                self.view_database()  # This will now create just one window
+                
+            except Exception as e:
+                QMessageBox.warning(self, 'Error', f'Could not delete face: {str(e)}')
 
     def closeEvent(self, event):
         """Clean up when closing the application."""
