@@ -33,9 +33,13 @@ os.makedirs(DATA_PATH, exist_ok=True)
 os.makedirs(UNIQUE_FACES_PATH, exist_ok=True)
 
 
-def initialize_camera():
+def initialize_camera(index=0):
     """Initialize video capture."""
-    cap = cv2.VideoCapture(DROIDCAM_URL) if DROIDCAM_URL else cv2.VideoCapture(0)
+    cap = None
+    if index > 1:
+        cap = cv2.VideoCapture(DROIDCAM_URL)
+    else:
+        cap = cv2.VideoCapture(index)
 
     if not cap.isOpened():
         print("Error: Could not open video stream")
@@ -169,7 +173,7 @@ def show_familiar_face(face_data, window_id):
 
 
 def main():
-    cap = initialize_camera()
+    cap = initialize_camera(index=0) # 0 for built-in camera, 1 for USB camera, 2 or higher for DroidCam
     frame_count = 0
     photo_count = 0
     familiar_faces = get_familiar_faces_data()  # Load familiar faces at startup
