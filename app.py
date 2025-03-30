@@ -73,13 +73,13 @@ class FaceRecognitionApp(QMainWindow):
         """Initialize all required directories."""
         self.IMAGES_PATH = os.path.join(os.path.dirname(__file__), "db", "images")
         self.FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "faces")
-        self.DATA_PATH = os.path.join(os.path.dirname(__file__), "db", "data")
         self.UNIQUE_FACES_PATH = os.path.join(os.path.dirname(__file__), "db", "unique_faces")
+        self.UNIQUE_FACES_DATA_PATH = os.path.join(os.path.dirname(__file__), "db", "unique_faces_data")  # New
 
         os.makedirs(self.IMAGES_PATH, exist_ok=True)
         os.makedirs(self.FACES_PATH, exist_ok=True)
-        os.makedirs(self.DATA_PATH, exist_ok=True)
         os.makedirs(self.UNIQUE_FACES_PATH, exist_ok=True)
+        os.makedirs(self.UNIQUE_FACES_DATA_PATH, exist_ok=True)  # New
 
     # def set_high_quality_mode(self, enable=True):
     #     """Enable high quality mode with tradeoffs."""
@@ -300,10 +300,14 @@ class FaceRecognitionApp(QMainWindow):
         # Play sound feedback
         winsound.Beep(1000, 500)
         
-        # Process face data
+        # Process face data - save to unique_faces_data instead of data
         frame_faces_data = self.get_faces_data(faces_paths, frame_path)
-        frame_faces_data_path = os.path.join(self.DATA_PATH, f"{frame_identifier}_data.json")
-        self.save_face_data(frame_faces_data_path, frame_faces_data)
+        for face_file, face_data in frame_faces_data.items():
+            # Save each face's data individually
+            unique_filename = os.path.basename(face_file)
+            data_path = os.path.join(self.UNIQUE_FACES_DATA_PATH, f"{os.path.splitext(unique_filename)[0]}_data.json")
+            with open(data_path, "w", encoding="utf-8") as f:
+                json.dump(face_data, f, ensure_ascii=False, indent=4)
 
         # Check for matches
         self.check_for_matches(frame_faces_data)
@@ -340,8 +344,26 @@ class FaceRecognitionApp(QMainWindow):
                 match_counter += 1
                 self.show_match(known_face_data, match_counter)
                 self.status_label.setText(f"Match found! ({match_counter} faces recognized)")
+                
+                # Remove the new face's data file since it's a duplicate
+                face_name = os.path.splitext(os.path.basename(face_path))[0]
+                data_path = os.path.join(self.UNIQUE_FACES_DATA_PATH, f"{face_name}_data.json")
+                if os.path.exists(data_path):
+                    try:
+                        os.remove(data_path)
+                    except Exception as e:
+                        self.status_label.setText(f"Couldn't remove duplicate data: {str(e)}")
+                
+                # Also remove from unique_faces folder if it was copied there
+                unique_face_path = os.path.join(self.UNIQUE_FACES_PATH, os.path.basename(face_path))
+                if os.path.exists(unique_face_path):
+                    try:
+                        os.remove(unique_face_path)
+                    except Exception as e:
+                        self.status_label.setText(f"Couldn't remove duplicate face: {str(e)}")
+                        
             else:
-                # Add to unique faces
+                # Add to unique faces (unchanged from before)
                 unique_face_filename = os.path.basename(face_path)
                 unique_face_path = os.path.join(self.UNIQUE_FACES_PATH, unique_face_filename)
                 shutil.copy2(face_path, unique_face_path)
@@ -381,18 +403,18 @@ class FaceRecognitionApp(QMainWindow):
             json.dump(faces_data, f, ensure_ascii=False, indent=4)
 
     def get_familiar_faces_data(self):
-        """Load all familiar faces data from the database."""
+        """Load all familiar faces data from unique_faces_data directory."""
         familiar_faces = {}
-        if not os.path.exists(self.DATA_PATH):
+        if not os.path.exists(self.UNIQUE_FACES_DATA_PATH):
             return familiar_faces
         
-        for file in os.listdir(self.DATA_PATH):
+        for file in os.listdir(self.UNIQUE_FACES_DATA_PATH):
             if file.endswith("_data.json"):
                 try:
-                    with open(os.path.join(self.DATA_PATH, file), "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        for face_path, face_data in data.items():
-                            familiar_faces[face_path] = face_data
+                    face_path = os.path.join(self.UNIQUE_FACES_PATH, file.replace("_data.json", ".jpg"))
+                    with open(os.path.join(self.UNIQUE_FACES_DATA_PATH, file), "r", encoding="utf-8") as f:
+                        face_data = json.load(f)
+                        familiar_faces[face_path] = face_data
                 except Exception as e:
                     self.status_label.setText(f"Error loading face data: {str(e)}")
         return familiar_faces
@@ -415,34 +437,34 @@ class FaceRecognitionApp(QMainWindow):
                 self.status_label.setText(f"Comparison error: {str(e)}")
         return None, None
 
-    def add_face_to_database(self):
-        """Manual method to add a face to the database."""
-        options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Face Image", "", "Images (*.png *.jpg *.jpeg)", options=options)
+    # def add_face_to_database(self):
+    #     """Manual method to add a face to the database."""
+    #     options = QFileDialog.Options()
+    #     file_path, _ = QFileDialog.getOpenFileName(
+    #         self, "Select Face Image", "", "Images (*.png *.jpg *.jpeg)", options=options)
             
-        if file_path:
-            try:
-                # Copy to faces directory
-                face_name = f"manual_{str(uuid.uuid4())}.jpg"
-                face_path = os.path.join(self.FACES_PATH, face_name)
-                shutil.copy2(file_path, face_path)
+    #     if file_path:
+    #         try:
+    #             # Copy to faces directory
+    #             face_name = f"manual_{str(uuid.uuid4())}.jpg"
+    #             face_path = os.path.join(self.FACES_PATH, face_name)
+    #             shutil.copy2(file_path, face_path)
                 
-                # Create face data
-                frame_name = f"manual_{str(uuid.uuid4())}.jpg"
-                frame_path = os.path.join(self.IMAGES_PATH, frame_name)
-                cv2.imwrite(frame_path, cv2.imread(file_path))
+    #             # Create face data
+    #             frame_name = f"manual_{str(uuid.uuid4())}.jpg"
+    #             frame_path = os.path.join(self.IMAGES_PATH, frame_name)
+    #             cv2.imwrite(frame_path, cv2.imread(file_path))
                 
-                face_data = self.get_faces_data([face_path], frame_path)
-                data_path = os.path.join(self.DATA_PATH, f"manual_{str(uuid.uuid4())}_data.json")
-                self.save_face_data(data_path, face_data)
+    #             face_data = self.get_faces_data([face_path], frame_path)
+    #             data_path = os.path.join(self.DATA_PATH, f"manual_{str(uuid.uuid4())}_data.json")
+    #             self.save_face_data(data_path, face_data)
                 
-                # Add to in-memory database
-                self.familiar_faces.update(face_data)
-                self.status_label.setText("Face added to database successfully")
+    #             # Add to in-memory database
+    #             self.familiar_faces.update(face_data)
+    #             self.status_label.setText("Face added to database successfully")
                 
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to add face: {str(e)}")
+    #         except Exception as e:
+    #             QMessageBox.warning(self, "Error", f"Failed to add face: {str(e)}")
 
     def view_database(self):
         """Show only unique faces from the unique_faces directory."""
@@ -534,41 +556,25 @@ class FaceRecognitionApp(QMainWindow):
         
         if reply == QMessageBox.Yes:
             try:
-                # Remove from filesystem
+                # Remove face image
                 os.remove(face_path)
                 
-                # Remove from familiar_faces dictionary
-                for path in list(self.familiar_faces.keys()):
-                    if os.path.basename(path) == os.path.basename(face_path):
-                        del self.familiar_faces[path]
+                # Remove face data
+                face_name = os.path.splitext(os.path.basename(face_path))[0]
+                data_path = os.path.join(self.UNIQUE_FACES_DATA_PATH, f"{face_name}_data.json")
+                if os.path.exists(data_path):
+                    os.remove(data_path)
                 
-                # Remove corresponding data file
-                data_files = [f for f in os.listdir(self.DATA_PATH) 
-                            if f.endswith('_data.json')]
-                
-                for data_file in data_files:
-                    data_path = os.path.join(self.DATA_PATH, data_file)
-                    with open(data_path, 'r') as f:
-                        data = json.load(f)
-                    
-                    # Check if this face is referenced in the data file
-                    updated_data = {k:v for k,v in data.items() 
-                                if os.path.basename(k) != os.path.basename(face_path)}
-                    
-                    # Save back if we removed something
-                    if len(updated_data) < len(data):
-                        if updated_data:
-                            with open(data_path, 'w') as f:
-                                json.dump(updated_data, f, indent=4)
-                        else:
-                            os.remove(data_path)
+                # Remove from in-memory database
+                if face_path in self.familiar_faces:
+                    del self.familiar_faces[face_path]
                 
                 QMessageBox.information(self, 'Success', 'Face deleted successfully')
                 
-                # Refresh the existing window instead of creating new one
+                # Refresh the database view
                 if self.db_window is not None:
                     self.db_window.close()
-                self.view_database()  # This will now create just one window
+                self.view_database()
                 
             except Exception as e:
                 QMessageBox.warning(self, 'Error', f'Could not delete face: {str(e)}')
