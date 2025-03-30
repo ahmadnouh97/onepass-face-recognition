@@ -51,6 +51,24 @@ class FaceRecognitionApp(QMainWindow):
 
         self.db_window = None
 
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts for main window only."""
+        if event.key() == Qt.Key_Space:
+            self.capture_faces()
+        elif event.key() == Qt.Key_V:
+            self.view_database()
+        else:
+            super().keyPressEvent(event)
+
+    def handle_db_window_keys(self, event):
+        """Handle key events for the database window only."""
+        if event.key() == Qt.Key_Escape:
+            self.db_window.close()
+            self.db_window = None
+        else:
+            # Forward other keys to default handler
+            QMainWindow.keyPressEvent(self.db_window, event)
+
     def initialize_paths(self):
         """Initialize all required directories."""
         self.IMAGES_PATH = os.path.join(os.path.dirname(__file__), "db", "images")
@@ -160,6 +178,12 @@ class FaceRecognitionApp(QMainWindow):
                 font-size: 14px;
             }
         """)
+        # Prevent buttons from stealing keyboard focus
+        for btn in [self.capture_btn, self.view_database_btn]:
+            btn.setFocusPolicy(Qt.NoFocus)
+        
+        # Ensure main window gets keyboard events
+        self.setFocusPolicy(Qt.StrongFocus)
 
     def initialize_camera(self, index=0):
         """Initialize video capture with high resolution."""
@@ -243,6 +267,9 @@ class FaceRecognitionApp(QMainWindow):
 
     def capture_faces(self):
         """Capture and process detected faces."""
+        self.capture_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        QTimer.singleShot(200, lambda: self.capture_btn.setStyleSheet(""))
+
         if not hasattr(self, 'faces_boxes') or not self.faces_boxes:
             self.status_label.setText("No faces detected to capture")
             return
@@ -428,6 +455,10 @@ class FaceRecognitionApp(QMainWindow):
         self.db_window.setWindowTitle("Unique Faces Database")
         self.db_window.setGeometry(200, 200, 800, 600)
         
+        self.db_window.keyPressEvent = self.handle_db_window_keys
+        
+        scroll = QScrollArea()
+
         scroll = QScrollArea()
         widget = QWidget()
         layout = QVBoxLayout()
@@ -492,6 +523,7 @@ class FaceRecognitionApp(QMainWindow):
 
         self.db_window.setCentralWidget(scroll)
         self.db_window.show()
+        self.db_window.raise_()
 
     def delete_face(self, face_path):
         """Delete a face from the unique faces database."""
