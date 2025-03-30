@@ -104,7 +104,7 @@ def capture_photo(frame, faces, photo_count):
 def get_faces_data(faces_paths, frame_path):
     faces_data = dict()
     for face_file in faces_paths:
-        results = DeepFace.represent(face_file, model_name="Facenet", enforce_detection=False)
+        results = DeepFace.represent(face_file, model_name="Facenet512", enforce_detection=False)
         result = results[0]
         result["frame_path"] = frame_path
         result["face_path"] = face_file
@@ -145,7 +145,7 @@ def find_similar_face(new_face_data, familiar_faces, threshold=0.6):
             distance = DeepFace.verify(
                 img1_path=new_face_data["face_path"],
                 img2_path=known_face_path,
-                model_name="Facenet",
+                model_name="Facenet512",
                 distance_metric="cosine",
                 enforce_detection=False
             )["distance"]
