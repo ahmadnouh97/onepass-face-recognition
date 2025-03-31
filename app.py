@@ -652,7 +652,7 @@ class FaceRecognitionApp(QMainWindow):
         faces_data = dict()
         for face_file in faces_paths:
             try:
-                results = DeepFace.represent(face_file, model_name="Facenet512", enforce_detection=False)
+                results = DeepFace.represent(face_file, model_name="ArcFace", enforce_detection=False)
                 result = results[0]
                 result["frame_path"] = frame_path
                 result["face_path"] = face_file
