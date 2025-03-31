@@ -1,7 +1,8 @@
 import os
 import cv2
 import json
-import uuid
+# import uuid
+from datetime import datetime
 import winsound
 import shutil
 from dotenv import load_dotenv
@@ -19,6 +20,10 @@ load_dotenv()
 
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
+
+def get_timestamp_id():
+    """Generate a unique ID based on current timestamp with milliseconds"""
+    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_FFF
 
 class FaceRecognitionApp(QMainWindow):
     def __init__(self):
@@ -57,6 +62,10 @@ class FaceRecognitionApp(QMainWindow):
             self.capture_faces()
         elif event.key() == Qt.Key_V:
             self.view_database()
+        elif event.key() == Qt.Key_C:  # Add 'C' key for clearing faces
+            self.clear_faces_ui()
+        # elif event.key() == Qt.Key_A:
+        #     self.add_selected_face_to_db()
         else:
             super().keyPressEvent(event)
 
@@ -115,16 +124,20 @@ class FaceRecognitionApp(QMainWindow):
         # self.quality_btn.setCheckable(True)
         # self.quality_btn.toggled.connect(self.set_high_quality_mode)
         # control_layout.addWidget(self.quality_btn)
-        
+        self.clear_faces_btn = QPushButton("Reset")
+        self.clear_faces_btn.clicked.connect(self.clear_faces_ui)
+        self.clear_faces_btn.setFocusPolicy(Qt.NoFocus)  # Prevent stealing keyboard focus
+        control_layout.addWidget(self.clear_faces_btn)
+
         self.capture_btn = QPushButton("Capture Faces (Space)")
         self.capture_btn.clicked.connect(self.capture_faces)
         control_layout.addWidget(self.capture_btn)
         
-        # self.add_face_btn = QPushButton("Add Face to Database")
-        # self.add_face_btn.clicked.connect(self.add_face_to_database)
+        # self.add_face_btn = QPushButton("Add Face Manually (A)")
+        # self.add_face_btn.clicked.connect(self.add_selected_face_to_db)
         # control_layout.addWidget(self.add_face_btn)
         
-        self.view_database_btn = QPushButton("View Database")
+        self.view_database_btn = QPushButton("View Database (V)")
         self.view_database_btn.clicked.connect(self.view_database)
         control_layout.addWidget(self.view_database_btn)
         
@@ -171,19 +184,58 @@ class FaceRecognitionApp(QMainWindow):
                 padding: 0 3px;
             }
             QPushButton {
-                padding: 8px;
+                padding: 5px;
                 font-weight: bold;
+                min-width: 80px;
             }
             QLabel {
                 font-size: 14px;
             }
+            /* Specific style for Add to DB buttons */
+            QPushButton[text="Add to DB"] {
+                margin-top: 5px;
+            }
+            QPushButton[text="Reset"] {
+                background-color: #607D8B;  /* Blue-gray */
+                color: white;
+                border: 1px solid #455A64;
+            }
+            QPushButton[text="Reset"]:hover {
+                background-color: #546E7A;  /* Slightly darker blue-gray */
+            }
+            QPushButton[text="Reset"]:pressed {
+                background-color: #455A64;  /* Even darker for pressed state */
+            }
         """)
         # Prevent buttons from stealing keyboard focus
-        for btn in [self.capture_btn, self.view_database_btn]:
+        btns = [
+            self.capture_btn,
+            self.view_database_btn
+            # self.add_face_btn
+        ]
+        for btn in btns:
             btn.setFocusPolicy(Qt.NoFocus)
         
         # Ensure main window gets keyboard events
         self.setFocusPolicy(Qt.StrongFocus)
+
+    def clear_faces_ui(self):
+        """Clear all detected and recognized faces from the UI."""
+        # Clear detected faces
+        for i in reversed(range(self.detected_faces_layout.count())): 
+            widget = self.detected_faces_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        
+        # Clear recognized faces
+        for i in reversed(range(self.matches_layout.count())): 
+            widget = self.matches_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        
+        # Clear current matches tracking
+        self.current_matches = {}
+        self.status_label.setText("UI cleared")
 
     def initialize_camera(self, index=0):
         """Initialize video capture with high resolution."""
@@ -279,7 +331,7 @@ class FaceRecognitionApp(QMainWindow):
             self.status_label.setText("Failed to grab frame for capture")
             return
             
-        frame_identifier = str(uuid.uuid4())
+        frame_identifier = get_timestamp_id()
         frame_name = f"{frame_identifier}.jpg"
         frame_path = os.path.join(self.IMAGES_PATH, frame_name)
         cv2.imwrite(frame_path, frame)
@@ -313,13 +365,21 @@ class FaceRecognitionApp(QMainWindow):
         self.check_for_matches(frame_faces_data)
 
     def show_detected_faces(self, faces_paths):
-        """Display the detected faces in the UI."""
+        """Display the detected faces in the UI with add buttons."""
         # Clear previous faces
         for i in reversed(range(self.detected_faces_layout.count())): 
-            self.detected_faces_layout.itemAt(i).widget().setParent(None)
-            
-        # Add new faces
+            widget = self.detected_faces_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        
+        # Add new faces with buttons
         for face_path in faces_paths:
+            # Create container widget for face + button
+            container = QWidget()
+            container_layout = QVBoxLayout()
+            container.setLayout(container_layout)
+            
+            # Face image
             face_label = QLabel()
             face_label.setAlignment(Qt.AlignCenter)
             face_label.setFixedSize(150, 150)
@@ -328,7 +388,64 @@ class FaceRecognitionApp(QMainWindow):
             if not pixmap.isNull():
                 pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 face_label.setPixmap(pixmap)
-                self.detected_faces_layout.addWidget(face_label)
+            
+            # Add button
+            add_btn = QPushButton("Add to DB")
+            add_btn.setFixedHeight(30)
+            add_btn.setFocusPolicy(Qt.NoFocus)  # <<< THIS IS THE CRITICAL LINE
+            add_btn.clicked.connect(lambda _, path=face_path: self.add_selected_face_to_db(path))
+            
+            container_layout.addWidget(face_label)
+            container_layout.addWidget(add_btn)
+            self.detected_faces_layout.addWidget(container)
+
+    def add_selected_face_to_db(self, face_path):
+        """Add a specific detected face to the database."""
+        try:
+            # First check for exact image duplicates (byte comparison)
+            with open(face_path, 'rb') as f:
+                new_face_bytes = f.read()
+                
+            # Compare against all existing faces in unique_faces
+            for existing_face in os.listdir(self.UNIQUE_FACES_PATH):
+                existing_path = os.path.join(self.UNIQUE_FACES_PATH, existing_face)
+                with open(existing_path, 'rb') as f:
+                    if f.read() == new_face_bytes:
+                        QMessageBox.information(self, "Info", "This image already exists in the database")
+                        return
+
+            # If no exact duplicate found, proceed with adding
+            face_name = f"manual_{get_timestamp_id()}.jpg"
+            unique_face_path = os.path.join(self.UNIQUE_FACES_PATH, face_name)
+            
+            # Copy the face image to unique faces directory
+            shutil.copy2(face_path, unique_face_path)
+            
+            # Create a dummy frame path
+            frame_name = f"manual_{get_timestamp_id()}.jpg"
+            frame_path = os.path.join(self.IMAGES_PATH, frame_name)
+            cv2.imwrite(frame_path, cv2.imread(face_path))
+            
+            # Generate face data
+            face_data = self.get_faces_data([unique_face_path], frame_path)
+            
+            if not face_data:
+                raise ValueError("Could not process the selected face image")
+                
+            # Save face data
+            data_filename = f"{os.path.splitext(face_name)[0]}_data.json"
+            data_path = os.path.join(self.UNIQUE_FACES_DATA_PATH, data_filename)
+            
+            with open(data_path, "w", encoding="utf-8") as f:
+                json.dump(face_data[unique_face_path], f, ensure_ascii=False, indent=4)
+            
+            # Add to in-memory database
+            self.familiar_faces[unique_face_path] = face_data[unique_face_path]
+            
+            QMessageBox.information(self, "Success", "Face added to database successfully")
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to add face: {str(e)}")
 
     def check_for_matches(self, frame_faces_data):
         """Check if any faces match known faces."""
@@ -437,34 +554,6 @@ class FaceRecognitionApp(QMainWindow):
                 self.status_label.setText(f"Comparison error: {str(e)}")
         return None, None
 
-    # def add_face_to_database(self):
-    #     """Manual method to add a face to the database."""
-    #     options = QFileDialog.Options()
-    #     file_path, _ = QFileDialog.getOpenFileName(
-    #         self, "Select Face Image", "", "Images (*.png *.jpg *.jpeg)", options=options)
-            
-    #     if file_path:
-    #         try:
-    #             # Copy to faces directory
-    #             face_name = f"manual_{str(uuid.uuid4())}.jpg"
-    #             face_path = os.path.join(self.FACES_PATH, face_name)
-    #             shutil.copy2(file_path, face_path)
-                
-    #             # Create face data
-    #             frame_name = f"manual_{str(uuid.uuid4())}.jpg"
-    #             frame_path = os.path.join(self.IMAGES_PATH, frame_name)
-    #             cv2.imwrite(frame_path, cv2.imread(file_path))
-                
-    #             face_data = self.get_faces_data([face_path], frame_path)
-    #             data_path = os.path.join(self.DATA_PATH, f"manual_{str(uuid.uuid4())}_data.json")
-    #             self.save_face_data(data_path, face_data)
-                
-    #             # Add to in-memory database
-    #             self.familiar_faces.update(face_data)
-    #             self.status_label.setText("Face added to database successfully")
-                
-    #         except Exception as e:
-    #             QMessageBox.warning(self, "Error", f"Failed to add face: {str(e)}")
 
     def view_database(self):
         """Show only unique faces from the unique_faces directory."""
