@@ -308,8 +308,8 @@ class FaceRecognitionApp(QMainWindow):
         self.cap = cv2.VideoCapture(index)
         
         # Set to highest possible resolution
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)  # Try max width
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)  # Try max height
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         
         # Alternatively, let OpenCV choose the maximum supported resolution
         # self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
