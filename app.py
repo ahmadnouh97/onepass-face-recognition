@@ -16,7 +16,7 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QSizePolicy
 from PyQt5.QtGui import QPainter, QPen, QColor, QFont, QPainterPath
-
+from PyQt5.QtCore import QRect
 
 
 # Load environment variables
@@ -35,45 +35,52 @@ class FaceLabel(QLabel):
         self.border_color = None
         self.match_id = None
         self.original_pixmap = None
+        self.distance = None
         
     def set_face_image(self, face_path):
         self.original_pixmap = QPixmap(face_path)
         if not self.original_pixmap.isNull():
-            self.original_pixmap = self.original_pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.original_pixmap = self.original_pixmap.scaled(
+                150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.update()
         
-    def set_match(self, match_id, color):
+    def set_match(self, match_id, color, distance):
         self.match_id = match_id
         self.border_color = color
-        self.update()
-        
-    def clear_match(self):
-        self.match_id = None
-        self.border_color = None
+        self.distance = distance
         self.update()
         
     def paintEvent(self, event):
-        # Draw the original image first
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         
+        # Draw the original image centered
         if self.original_pixmap:
-            # Center the pixmap
             x = (self.width() - self.original_pixmap.width()) // 2
             y = (self.height() - self.original_pixmap.height()) // 2
             painter.drawPixmap(x, y, self.original_pixmap)
             
-            # Draw border if matched
-            if self.border_color and self.match_id:
+            # Draw highlight if matched
+            if self.border_color and self.match_id is not None:
+                # Border
                 pen = QPen(self.border_color)
                 pen.setWidth(4)
                 painter.setPen(pen)
                 painter.drawRect(0, 0, self.width()-1, self.height()-1)
                 
-                # Draw match number
-                painter.setPen(Qt.black)
-                painter.setBrush(self.border_color)
-                painter.setFont(QFont("Arial", 10, QFont.Bold))
-                painter.drawText(5, 15, str(self.match_id))
+                # Match info box
+                painter.setPen(Qt.white)
+                painter.setBrush(QColor(0, 0, 0, 180))  # Semi-transparent black
+                info_rect = QRect(0, self.height()-25, self.width(), 25)
+                painter.drawRect(info_rect)
+                
+                # Match text
+                painter.setFont(QFont("Arial", 8))
+                painter.drawText(
+                    info_rect, 
+                    Qt.AlignCenter, 
+                    f"Match #{self.match_id} ({self.distance:.3f})"
+                )
         
         painter.end()
 
@@ -509,28 +516,21 @@ class FaceRecognitionApp(QMainWindow):
 
     def check_for_matches(self, frame_faces_data):
         """Check if any faces match known faces."""
-        # Clear previous matches
         self.clear_matches_ui()
         self.match_colors = {}
-        
         match_counter = 0
         
         for face_path, face_data in frame_faces_data.items():
-            known_face_path, known_face_data = self.find_similar_face(face_data, self.familiar_faces)
+            known_face_path, known_face_data, distance = self.find_similar_face(face_data, self.familiar_faces)
             
             if known_face_path:
                 match_counter += 1
-                # Generate a distinct color for this match
-                hue = (match_counter * 60) % 360  # Spread colors evenly
+                hue = (match_counter * 60) % 360
                 match_color = QColor.fromHsv(hue, 255, 255)
                 self.match_colors[match_counter] = match_color
                 
-                # Highlight the detected face
-                self.highlight_detected_face(face_path, match_counter, match_color)
-                
-                # Show the match
-                self.show_match(known_face_data, match_counter, match_color)
-                
+                self.highlight_detected_face(face_path, match_counter, match_color, distance)
+                self.show_match(known_face_data, match_counter, match_color, distance)
                 self.status_label.setText(f"Match found! ({match_counter} faces recognized)")
                 # Remove the new face's data file since it's a duplicate
                 face_name = os.path.splitext(os.path.basename(face_path))[0]
@@ -567,13 +567,13 @@ class FaceRecognitionApp(QMainWindow):
             if widget:
                 widget.setParent(None)
 
-    def show_match(self, face_data, match_id, match_color):
+    def show_match(self, face_data, match_id, match_color, distance):
         """Display a matched face in the UI with colored border."""
         match_label = FaceLabel()
         match_label.setAlignment(Qt.AlignCenter)
         match_label.setFixedSize(150, 150)
         match_label.set_face_image(face_data["face_path"])
-        match_label.set_match(match_id, match_color)
+        match_label.set_match(match_id, match_color, distance)
         self.matches_layout.addWidget(match_label)
 
     def get_faces_data(self, faces_paths, frame_path):
@@ -614,19 +614,19 @@ class FaceRecognitionApp(QMainWindow):
         """Check if the new face matches any familiar face."""
         for known_face_path, known_face_data in familiar_faces.items():
             try:
-                distance = DeepFace.verify(
+                verification = DeepFace.verify(
                     img1_path=new_face_data["face_path"],
                     img2_path=known_face_path,
                     model_name="Facenet512",
                     distance_metric="cosine",
                     enforce_detection=False
-                )["distance"]
-                print(f"Distance: {distance} - Between {new_face_data['face_path']} and {known_face_path}")
+                )
+                distance = verification["distance"]
                 if distance < threshold:
-                    return known_face_path, known_face_data
+                    return known_face_path, known_face_data, distance
             except Exception as e:
-                self.status_label.setText(f"Comparison error: {str(e)}")
-        return None, None
+                print(f"Comparison error: {str(e)}")
+        return None, None, None
 
     def view_database(self):
         """Show only unique faces from the unique_faces directory."""
@@ -741,10 +741,10 @@ class FaceRecognitionApp(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, 'Error', f'Could not delete face: {str(e)}')
 
-    def highlight_detected_face(self, face_path, match_id, match_color):
+    def highlight_detected_face(self, face_path, match_id, match_color, distance):
         """Highlight a detected face that was matched in the UI."""
         if hasattr(self, 'face_labels') and face_path in self.face_labels:
-            self.face_labels[face_path].set_match(match_id, match_color)
+            self.face_labels[face_path].set_match(match_id, match_color, distance)
 
     def add_border_to_pixmap(self, pixmap, color, match_id):
         """Add a colored border with match ID to a pixmap."""
