@@ -419,6 +419,23 @@ class FaceRecognitionApp(QMainWindow):
         for (x, y, w, h) in faces:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
+    def preprocess(self, img_path):
+        # Check if file exists
+        if not os.path.exists(img_path):
+            raise FileNotFoundError(f"Image not found: {img_path}")
+        
+        # Load as grayscale (directly)
+        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise ValueError("Invalid image file or format")
+        
+        # Apply CLAHE
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        img_clahe = clahe.apply(img)
+        
+        # Convert back to 3-channel (if needed for DeepFace)
+        return cv2.cvtColor(img_clahe, cv2.COLOR_GRAY2BGR)
+
     def capture_faces(self):
         """Capture and process detected faces."""
         self.capture_btn.setStyleSheet("background-color: #4CAF50; color: white;")
@@ -437,14 +454,14 @@ class FaceRecognitionApp(QMainWindow):
         frame_name = f"{frame_identifier}.jpg"
         frame_path = os.path.join(self.IMAGES_PATH, frame_name)
         cv2.imwrite(frame_path, frame)
+        frame_processed = self.preprocess(frame_path)
 
         faces_paths = []
         for i, (x, y, w, h) in enumerate(self.faces_boxes):
-            face_crop = frame[y:y + h, x:x + w]
+            face_crop = frame_processed[y:y + h, x:x + w]
             face_identifier = f"{frame_identifier}_face_0{i}"
             face_name = f"{face_identifier}.jpg"
             face_path = os.path.join(self.FACES_PATH, face_name)
-
             cv2.imwrite(face_path, face_crop)
             faces_paths.append(face_path)
         
