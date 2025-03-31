@@ -18,6 +18,7 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QSizePolicy
 from PyQt5.QtGui import QPainter, QPen, QColor, QFont
 from PyQt5.QtCore import QRect
+from PyQt5.QtCore import QThread, pyqtSignal
 
 
 # Load environment variables
@@ -29,6 +30,33 @@ face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
 def get_timestamp_id():
     """Generate a unique ID based on current timestamp with milliseconds"""
     return datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_FFF
+
+class LoadFacesThread(QThread):
+    faces_loaded = pyqtSignal(dict)
+    
+    def __init__(self, data_path, faces_path):
+        super().__init__()
+        self.data_path = data_path
+        self.faces_path = faces_path
+    
+    def run(self):
+        """Load face data in background thread."""
+        familiar_faces = {}
+        if not os.path.exists(self.data_path):
+            self.faces_loaded.emit(familiar_faces)
+            return
+        
+        for file in os.listdir(self.data_path):
+            if file.endswith("_data.json"):
+                try:
+                    face_path = os.path.join(self.faces_path, file.replace("_data.json", ".jpg"))
+                    with open(os.path.join(self.data_path, file), "r", encoding="utf-8") as f:
+                        face_data = json.load(f)
+                        familiar_faces[face_path] = face_data
+                except Exception as e:
+                    print(f"Error loading face data: {str(e)}")
+        
+        self.faces_loaded.emit(familiar_faces)
 
 class FaceLabel(QLabel):
     def __init__(self, parent=None):
@@ -117,6 +145,17 @@ class FaceRecognitionApp(QMainWindow):
         self.db_window = None
         self.face_widgets = {}  # Track face widgets by their paths
         self.match_colors = {}  # Store match colors
+
+        # Load familiar faces in a background thread
+        self.familiar_faces = {}
+        self.load_faces_thread = LoadFacesThread(self.UNIQUE_FACES_DATA_PATH, self.UNIQUE_FACES_PATH)
+        self.load_faces_thread.faces_loaded.connect(self.on_faces_loaded)
+        self.load_faces_thread.start()
+
+    def on_faces_loaded(self, faces_data):
+        """Callback when faces are loaded in background."""
+        self.familiar_faces = faces_data
+        self.status_label.setText(f"Loaded {len(faces_data)} known faces")
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts for main window only."""
@@ -428,18 +467,26 @@ class FaceRecognitionApp(QMainWindow):
         self.check_for_matches(frame_faces_data)
 
     def show_detected_faces(self, faces_paths):
-        """Display the detected faces in the UI with add buttons."""
+        """Display the detected faces in the UI with optimized loading."""
         # Clear previous faces
         self.clear_detected_faces_ui()
         
-        # Add new faces with buttons
+        # Load all images first
+        pixmaps = []
         for face_path in faces_paths:
+            pixmap = QPixmap(face_path)
+            if not pixmap.isNull():
+                pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pixmaps.append(pixmap)
+        
+        # Then create UI elements
+        for i, (face_path, pixmap) in enumerate(zip(faces_paths, pixmaps)):
             # Create container widget for face + button
             container = QWidget()
             container_layout = QVBoxLayout()
             container.setLayout(container_layout)
             
-            # Create a custom label that can draw borders
+            # Create a custom label
             face_label = FaceLabel()
             face_label.setAlignment(Qt.AlignCenter)
             face_label.setFixedSize(150, 150)
@@ -455,7 +502,7 @@ class FaceRecognitionApp(QMainWindow):
             container_layout.addWidget(add_btn)
             self.detected_faces_layout.addWidget(container)
             
-            # Store reference to this face label
+            # Store reference
             if not hasattr(self, 'face_labels'):
                 self.face_labels = {}
             self.face_labels[face_path] = face_label
