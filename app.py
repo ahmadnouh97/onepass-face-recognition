@@ -8,6 +8,8 @@ import shutil
 from dotenv import load_dotenv
 from deepface import DeepFace
 import mediapipe as mp
+import numpy as np
+from scipy import spatial
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                             QPushButton, QWidget, QLabel, QScrollArea, QGroupBox,
                             QMessageBox)
@@ -610,22 +612,30 @@ class FaceRecognitionApp(QMainWindow):
         return familiar_faces
 
     def find_similar_face(self, new_face_data, familiar_faces, threshold=0.25):
-        """Check if the new face matches any familiar face."""
+        """Check if the new face matches any familiar face using fast vector comparison."""
+        # Get the embedding of the new face
+        new_embedding = np.array(new_face_data["embedding"])
+        
+        best_match = None
+        best_distance = float('inf')
+        best_face_data = None
+        
+        # Compare embeddings directly instead of using DeepFace.verify
         for known_face_path, known_face_data in familiar_faces.items():
             try:
-                verification = DeepFace.verify(
-                    img1_path=new_face_data["face_path"],
-                    img2_path=known_face_path,
-                    model_name="Facenet512",
-                    distance_metric="cosine",
-                    enforce_detection=False
-                )
-                distance = verification["distance"]
-                if distance < threshold:
-                    return known_face_path, known_face_data, distance
+                known_embedding = np.array(known_face_data["embedding"])
+                
+                # Calculate cosine distance
+                distance = spatial.distance.cosine(new_embedding, known_embedding)
+                
+                if distance < threshold and distance < best_distance:
+                    best_match = known_face_path
+                    best_distance = distance
+                    best_face_data = known_face_data
             except Exception as e:
                 print(f"Comparison error: {str(e)}")
-        return None, None, None
+        
+        return best_match, best_face_data, best_distance
 
     def view_database(self):
         """Show only unique faces from the unique_faces directory."""
