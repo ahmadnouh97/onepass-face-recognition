@@ -24,8 +24,11 @@ from PyQt5.QtCore import QThread, pyqtSignal
 # Load environment variables
 load_dotenv()
 
+CAMERA_INDEX = 0 # 0 for built-in camera, 1 for usb camera , >=2 for droidcam
+
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
+DROIDCAM_URL = os.getenv("DROIDCAM_URL")
 
 def get_timestamp_id():
     """Generate a unique ID based on current timestamp with milliseconds"""
@@ -131,7 +134,7 @@ class FaceRecognitionApp(QMainWindow):
         self.familiar_faces = self.get_familiar_faces_data()
         
         # Start camera
-        self.initialize_camera()
+        self.initialize_camera(index=CAMERA_INDEX)
         
         # Timer for video feed
         self.timer = QTimer(self)
@@ -343,8 +346,11 @@ class FaceRecognitionApp(QMainWindow):
         """Initialize video capture with high resolution."""
         if self.cap is not None:
             self.cap.release()
-            
-        self.cap = cv2.VideoCapture(index)
+        
+        if index <= 1:
+            self.cap = cv2.VideoCapture(index)
+        else:
+            self.cap = cv2.VideoCapture(DROIDCAM_URL)
         
         # Set to highest possible resolution
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
