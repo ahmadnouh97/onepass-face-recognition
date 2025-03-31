@@ -24,7 +24,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 # Load environment variables
 load_dotenv()
 
-CAMERA_INDEX = 0 # 0 for built-in camera, 1 for usb camera , >=2 for droidcam
+CAMERA_INDEX = 2 # 0 for built-in camera, 1 for usb camera , >=2 for droidcam
 
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
@@ -460,8 +460,8 @@ class FaceRecognitionApp(QMainWindow):
         frame_name = f"{frame_identifier}.jpg"
         frame_path = os.path.join(self.IMAGES_PATH, frame_name)
         cv2.imwrite(frame_path, frame)
-        frame_processed = self.preprocess(frame_path)
-
+        # frame_processed = self.preprocess(frame_path)
+        frame_processed = frame
         faces_paths = []
         for i, (x, y, w, h) in enumerate(self.faces_boxes):
             face_crop = frame_processed[y:y + h, x:x + w]
