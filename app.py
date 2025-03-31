@@ -1,7 +1,6 @@
 import os
 import cv2
 import json
-import random
 # import uuid
 from datetime import datetime
 import winsound
@@ -11,11 +10,11 @@ from deepface import DeepFace
 import mediapipe as mp
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                             QPushButton, QWidget, QLabel, QScrollArea, QGroupBox,
-                            QFileDialog, QMessageBox)
+                            QMessageBox)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QSizePolicy
-from PyQt5.QtGui import QPainter, QPen, QColor, QFont, QPainterPath
+from PyQt5.QtGui import QPainter, QPen, QColor, QFont
 from PyQt5.QtCore import QRect
 
 
