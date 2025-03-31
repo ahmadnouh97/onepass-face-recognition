@@ -1,4 +1,5 @@
 opencv-python
 mediapipe
+deepface
 python-dotenv==1.0.0
 pyqt5==5.15.11
