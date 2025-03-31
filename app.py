@@ -1,6 +1,7 @@
 import os
 import cv2
 import json
+import random
 # import uuid
 from datetime import datetime
 import winsound
@@ -14,6 +15,9 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QSizePolicy
+from PyQt5.QtGui import QPainter, QPen, QColor, QFont, QPainterPath
+
+
 
 # Load environment variables
 load_dotenv()
@@ -24,6 +28,54 @@ face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
 def get_timestamp_id():
     """Generate a unique ID based on current timestamp with milliseconds"""
     return datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_FFF
+
+class FaceLabel(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.border_color = None
+        self.match_id = None
+        self.original_pixmap = None
+        
+    def set_face_image(self, face_path):
+        self.original_pixmap = QPixmap(face_path)
+        if not self.original_pixmap.isNull():
+            self.original_pixmap = self.original_pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.update()
+        
+    def set_match(self, match_id, color):
+        self.match_id = match_id
+        self.border_color = color
+        self.update()
+        
+    def clear_match(self):
+        self.match_id = None
+        self.border_color = None
+        self.update()
+        
+    def paintEvent(self, event):
+        # Draw the original image first
+        painter = QPainter(self)
+        
+        if self.original_pixmap:
+            # Center the pixmap
+            x = (self.width() - self.original_pixmap.width()) // 2
+            y = (self.height() - self.original_pixmap.height()) // 2
+            painter.drawPixmap(x, y, self.original_pixmap)
+            
+            # Draw border if matched
+            if self.border_color and self.match_id:
+                pen = QPen(self.border_color)
+                pen.setWidth(4)
+                painter.setPen(pen)
+                painter.drawRect(0, 0, self.width()-1, self.height()-1)
+                
+                # Draw match number
+                painter.setPen(Qt.black)
+                painter.setBrush(self.border_color)
+                painter.setFont(QFont("Arial", 10, QFont.Bold))
+                painter.drawText(5, 15, str(self.match_id))
+        
+        painter.end()
 
 class FaceRecognitionApp(QMainWindow):
     def __init__(self):
@@ -55,6 +107,8 @@ class FaceRecognitionApp(QMainWindow):
         self.next_window_id = 1
 
         self.db_window = None
+        self.face_widgets = {}  # Track face widgets by their paths
+        self.match_colors = {}  # Store match colors
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts for main window only."""
@@ -234,7 +288,8 @@ class FaceRecognitionApp(QMainWindow):
                 widget.setParent(None)
         
         # Clear current matches tracking
-        self.current_matches = {}
+        if hasattr(self, 'face_labels'):
+            self.face_labels = {}
         self.status_label.setText("UI cleared")
 
     def initialize_camera(self, index=0):
@@ -367,10 +422,7 @@ class FaceRecognitionApp(QMainWindow):
     def show_detected_faces(self, faces_paths):
         """Display the detected faces in the UI with add buttons."""
         # Clear previous faces
-        for i in reversed(range(self.detected_faces_layout.count())): 
-            widget = self.detected_faces_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
+        self.clear_detected_faces_ui()
         
         # Add new faces with buttons
         for face_path in faces_paths:
@@ -379,25 +431,33 @@ class FaceRecognitionApp(QMainWindow):
             container_layout = QVBoxLayout()
             container.setLayout(container_layout)
             
-            # Face image
-            face_label = QLabel()
+            # Create a custom label that can draw borders
+            face_label = FaceLabel()
             face_label.setAlignment(Qt.AlignCenter)
             face_label.setFixedSize(150, 150)
-            
-            pixmap = QPixmap(face_path)
-            if not pixmap.isNull():
-                pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                face_label.setPixmap(pixmap)
+            face_label.set_face_image(face_path)
             
             # Add button
             add_btn = QPushButton("Add to DB")
             add_btn.setFixedHeight(30)
-            add_btn.setFocusPolicy(Qt.NoFocus)  # <<< THIS IS THE CRITICAL LINE
+            add_btn.setFocusPolicy(Qt.NoFocus)
             add_btn.clicked.connect(lambda _, path=face_path: self.add_selected_face_to_db(path))
             
             container_layout.addWidget(face_label)
             container_layout.addWidget(add_btn)
             self.detected_faces_layout.addWidget(container)
+            
+            # Store reference to this face label
+            if not hasattr(self, 'face_labels'):
+                self.face_labels = {}
+            self.face_labels[face_path] = face_label
+
+    def clear_detected_faces_ui(self):
+        """Clear just the detected faces UI."""
+        for i in reversed(range(self.detected_faces_layout.count())): 
+            widget = self.detected_faces_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
 
     def add_selected_face_to_db(self, face_path):
         """Add a specific detected face to the database."""
@@ -450,18 +510,28 @@ class FaceRecognitionApp(QMainWindow):
     def check_for_matches(self, frame_faces_data):
         """Check if any faces match known faces."""
         # Clear previous matches
-        for i in reversed(range(self.matches_layout.count())): 
-            self.matches_layout.itemAt(i).widget().setParent(None)
-            
+        self.clear_matches_ui()
+        self.match_colors = {}
+        
         match_counter = 0
+        
         for face_path, face_data in frame_faces_data.items():
             known_face_path, known_face_data = self.find_similar_face(face_data, self.familiar_faces)
             
             if known_face_path:
                 match_counter += 1
-                self.show_match(known_face_data, match_counter)
-                self.status_label.setText(f"Match found! ({match_counter} faces recognized)")
+                # Generate a distinct color for this match
+                hue = (match_counter * 60) % 360  # Spread colors evenly
+                match_color = QColor.fromHsv(hue, 255, 255)
+                self.match_colors[match_counter] = match_color
                 
+                # Highlight the detected face
+                self.highlight_detected_face(face_path, match_counter, match_color)
+                
+                # Show the match
+                self.show_match(known_face_data, match_counter, match_color)
+                
+                self.status_label.setText(f"Match found! ({match_counter} faces recognized)")
                 # Remove the new face's data file since it's a duplicate
                 face_name = os.path.splitext(os.path.basename(face_path))[0]
                 data_path = os.path.join(self.UNIQUE_FACES_DATA_PATH, f"{face_name}_data.json")
@@ -490,17 +560,21 @@ class FaceRecognitionApp(QMainWindow):
                 self.familiar_faces[unique_face_path] = face_data
                 self.status_label.setText("New faces added to database")
 
-    def show_match(self, face_data, match_id):
-        """Display a matched face in the UI."""
-        match_label = QLabel()
+    def clear_matches_ui(self):
+        """Clear just the matches UI."""
+        for i in reversed(range(self.matches_layout.count())): 
+            widget = self.matches_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+    def show_match(self, face_data, match_id, match_color):
+        """Display a matched face in the UI with colored border."""
+        match_label = FaceLabel()
         match_label.setAlignment(Qt.AlignCenter)
         match_label.setFixedSize(150, 150)
-        
-        pixmap = QPixmap(face_data["face_path"])
-        if not pixmap.isNull():
-            pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            match_label.setPixmap(pixmap)
-            self.matches_layout.addWidget(match_label)
+        match_label.set_face_image(face_data["face_path"])
+        match_label.set_match(match_id, match_color)
+        self.matches_layout.addWidget(match_label)
 
     def get_faces_data(self, faces_paths, frame_path):
         faces_data = dict()
@@ -553,7 +627,6 @@ class FaceRecognitionApp(QMainWindow):
             except Exception as e:
                 self.status_label.setText(f"Comparison error: {str(e)}")
         return None, None
-
 
     def view_database(self):
         """Show only unique faces from the unique_faces directory."""
@@ -667,6 +740,36 @@ class FaceRecognitionApp(QMainWindow):
                 
             except Exception as e:
                 QMessageBox.warning(self, 'Error', f'Could not delete face: {str(e)}')
+
+    def highlight_detected_face(self, face_path, match_id, match_color):
+        """Highlight a detected face that was matched in the UI."""
+        if hasattr(self, 'face_labels') and face_path in self.face_labels:
+            self.face_labels[face_path].set_match(match_id, match_color)
+
+    def add_border_to_pixmap(self, pixmap, color, match_id):
+        """Add a colored border with match ID to a pixmap."""
+        bordered = QPixmap(pixmap.width() + 20, pixmap.height() + 20)
+        bordered.fill(Qt.transparent)
+        
+        painter = QPainter(bordered)
+        try:
+            # Draw colored border
+            pen = QPen(color, 5)
+            painter.setPen(pen)
+            painter.drawRect(0, 0, bordered.width() - 1, bordered.height() - 1)
+            
+            # Draw match number in corner
+            painter.setPen(Qt.black)
+            painter.setBrush(color)
+            painter.setFont(QFont("Arial", 12, QFont.Bold))
+            painter.drawText(5, 15, str(match_id))
+            
+            # Draw original image centered
+            painter.drawPixmap(10, 10, pixmap)
+        finally:
+            painter.end()
+        
+        return bordered
 
     def closeEvent(self, event):
         """Clean up when closing the application."""
