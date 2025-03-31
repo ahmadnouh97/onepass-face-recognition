@@ -25,7 +25,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 load_dotenv()
 
 CAMERA_INDEX = 2 # 0 for built-in camera, 1 for usb camera , >=2 for droidcam
-THRESHOLD = 0.3
+THRESHOLD = 0.5
 
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
@@ -354,12 +354,12 @@ class FaceRecognitionApp(QMainWindow):
             self.cap = cv2.VideoCapture(DROIDCAM_URL)
         
         # Set to highest possible resolution
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        # self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        # self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         
         # Alternatively, let OpenCV choose the maximum supported resolution
-        # self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        # self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
         if not self.cap.isOpened():
             QMessageBox.critical(self, "Error", "Could not open video stream")
