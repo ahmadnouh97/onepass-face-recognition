@@ -25,6 +25,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 load_dotenv()
 
 CAMERA_INDEX = 2 # 0 for built-in camera, 1 for usb camera , >=2 for droidcam
+THRESHOLD = 0.3
 
 mp_face_detection = mp.solutions.face_detection
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.5)
@@ -681,7 +682,7 @@ class FaceRecognitionApp(QMainWindow):
                     self.status_label.setText(f"Error loading face data: {str(e)}")
         return familiar_faces
 
-    def find_similar_face(self, new_face_data, familiar_faces, threshold=0.25):
+    def find_similar_face(self, new_face_data, familiar_faces, threshold=THRESHOLD):
         """Optimized face matching with numpy arrays."""
         if not familiar_faces:
             return None, None, float('inf')
