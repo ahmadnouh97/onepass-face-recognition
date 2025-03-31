@@ -659,30 +659,30 @@ class FaceRecognitionApp(QMainWindow):
         return familiar_faces
 
     def find_similar_face(self, new_face_data, familiar_faces, threshold=0.25):
-        """Check if the new face matches any familiar face using fast vector comparison."""
+        """Optimized face matching with numpy arrays."""
+        if not familiar_faces:
+            return None, None, float('inf')
+        
         # Get the embedding of the new face
         new_embedding = np.array(new_face_data["embedding"])
         
-        best_match = None
-        best_distance = float('inf')
-        best_face_data = None
+        # Precompute all known embeddings
+        known_paths = list(familiar_faces.keys())
+        known_embeddings = np.array([familiar_faces[p]["embedding"] for p in known_paths])
         
-        # Compare embeddings directly instead of using DeepFace.verify
-        for known_face_path, known_face_data in familiar_faces.items():
-            try:
-                known_embedding = np.array(known_face_data["embedding"])
-                
-                # Calculate cosine distance
-                distance = spatial.distance.cosine(new_embedding, known_embedding)
-                
-                if distance < threshold and distance < best_distance:
-                    best_match = known_face_path
-                    best_distance = distance
-                    best_face_data = known_face_data
-            except Exception as e:
-                print(f"Comparison error: {str(e)}")
+        # Batch compute cosine distances
+        distances = spatial.distance.cdist([new_embedding], known_embeddings, 'cosine')[0]
         
-        return best_match, best_face_data, best_distance
+        # Find best match
+        min_idx = np.argmin(distances)
+        min_distance = distances[min_idx]
+        
+        if min_distance < threshold:
+            best_path = known_paths[min_idx]
+            best_data = familiar_faces[best_path]
+            return best_path, best_data, min_distance
+        
+        return None, None, float('inf')
 
     def view_database(self):
         """Show only unique faces from the unique_faces directory."""
