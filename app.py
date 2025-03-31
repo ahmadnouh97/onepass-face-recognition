@@ -536,7 +536,7 @@ class FaceRecognitionApp(QMainWindow):
                     self.status_label.setText(f"Error loading face data: {str(e)}")
         return familiar_faces
 
-    def find_similar_face(self, new_face_data, familiar_faces, threshold=0.6):
+    def find_similar_face(self, new_face_data, familiar_faces, threshold=0.25):
         """Check if the new face matches any familiar face."""
         for known_face_path, known_face_data in familiar_faces.items():
             try:
@@ -547,7 +547,7 @@ class FaceRecognitionApp(QMainWindow):
                     distance_metric="cosine",
                     enforce_detection=False
                 )["distance"]
-                
+                print(f"Distance: {distance} - Between {new_face_data['face_path']} and {known_face_path}")
                 if distance < threshold:
                     return known_face_path, known_face_data
             except Exception as e:
