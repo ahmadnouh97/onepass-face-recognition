@@ -1,0 +1,17 @@
+[project]
+name = "onepass-face-recognition"
+version = "0.1.0"
+description = "Real-time local face capture and recognition with OpenCV, with optional DeepFace enhancement"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "opencv-python>=4.8,<5",
+    "python-dotenv>=1,<2",
+]
+
+[project.optional-dependencies]
+ml = [
+    "deepface>=0.0.100",
+    "mediapipe>=0.10.14,<0.11",
+    "tf-keras>=2.16,<2.22",
+]
