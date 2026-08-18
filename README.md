@@ -142,7 +142,7 @@ docker compose down
 - Browser stations preserve a 1280×720 preview. They send a high-resolution identity frame when a track appears and every 1.2 seconds, while intervening 640-pixel frames update normalized face boxes with OpenCV optical flow. Only one frame is in flight, preventing stale-result backlog on CPU-only operator workstations. Each identity refresh is authoritative: overlays not re-detected are removed instead of drifting on background texture. A GPU server is recommended for a five-station deployment.
 - A confirmed recognition records a new immutable entry event. Prior entry is displayed as an allowed re-entry, not an automatic denial.
 - Selecting a face creates a short-lived, operator-scoped enrollment capture. The enrollment form remains available if the live track disappears, and the capture is removed after a successful enrollment or its expiry.
-- Enrollment checks for likely existing faces. Guards must review a possible duplicate or explicitly declare the person distinct.
+- Enrollment checks for likely existing faces. Guards can add a held, quality-checked capture to an existing person and should collect 4–6 natural samples (straight on, slight left/right, and normal lighting changes) before relying on recognition. Guards must review a possible duplicate or explicitly declare the person distinct.
 - Administrators can delete people; this removes their face samples and creates an audit record. Records otherwise remain until an administrator removes them.
 - `db/` is local application data. Existing legacy captures are never imported automatically.
 

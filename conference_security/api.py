@@ -12,8 +12,8 @@ from .config import settings
 from .db import SessionLocal, get_session, initialize_database
 from .models import AuditLog, ConferenceEvent, Decision, EntryEvent, Person, Role, Station, User
 from .recognition import Track, decode_live_frame, enrollment_captures, identity_engine, trackers
-from .schemas import EnrollmentCaptureOut, EnrollmentCaptureRequest, EntryDecisionRequest, EntryEventOut, EnrollmentRequest, EventCreate, PersonOut, StationCreate, TokenRequest, TokenResponse, TrackResult, UserCreate
-from .services import active_event, audit, enrollment, last_entry, nearest_people, person_out, record_entry
+from .schemas import EnrollmentCaptureOut, EnrollmentCaptureRequest, EntryDecisionRequest, EntryEventOut, EnrollmentRequest, EventCreate, FaceSampleAddRequest, PersonOut, StationCreate, TokenRequest, TokenResponse, TrackResult, UserCreate
+from .services import active_event, add_face_sample, audit, enrollment, last_entry, nearest_people, person_out, record_entry
 
 
 def bootstrap() -> None:
@@ -135,6 +135,25 @@ def capture_enrollment(request: EnrollmentCaptureRequest, session: Session = Dep
     capture = enrollment_captures.create(station.id, user.id, track)
     return EnrollmentCaptureOut(capture_id=capture.capture_id, expires_in_seconds=int(enrollment_captures.expires_after))
 
+
+@app.post("/api/people/{person_id}/samples", response_model=PersonOut)
+def add_person_sample(person_id: str, request: FaceSampleAddRequest, session: Session = Depends(get_session), user: User = Depends(require_role(Role.ADMINISTRATOR, Role.OPERATOR))) -> PersonOut:
+    station = session.get(Station, request.station_id)
+    if station is None or not station.enabled:
+        raise HTTPException(status_code=404, detail="Station is not available")
+    person = session.scalar(select(Person).where(Person.id == person_id).with_for_update())
+    if person is None:
+        raise HTTPException(status_code=404, detail="Person was not found")
+    track = enrollment_captures.get(request.capture_id, station.id, user.id)
+    if track is None:
+        raise HTTPException(status_code=409, detail="This saved face capture has expired. Select the face again.")
+    if not track.embedding:
+        raise HTTPException(status_code=503, detail="Automatic enrollment requires the InsightFace ONNX recognition engine.")
+    if track.quality < 30:
+        raise HTTPException(status_code=422, detail="Face image is too blurry to add as a sample. Ask the person to face the camera.")
+    result = add_face_sample(session, user, station, person, track)
+    enrollment_captures.consume(request.capture_id)
+    return PersonOut(**result)
 
 @app.post("/api/enrollments")
 def enroll(request: EnrollmentRequest, session: Session = Depends(get_session), user: User = Depends(require_role(Role.ADMINISTRATOR, Role.OPERATOR))) -> dict:

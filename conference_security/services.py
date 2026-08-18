@@ -64,6 +64,19 @@ def enrollment(session: Session, actor: User, station: Station, track: Track, na
     return {"status": "enrolled", "person": person_out(person), "candidates": []}
 
 
+def add_face_sample(session: Session, actor: User, station: Station, person: Person, track: Track) -> dict:
+    """Append an operator-confirmed high-quality sample to an existing identity."""
+    try:
+        person.version += 1
+        session.add(FaceSample(person_id=person.id, image_path=save_sample(track, person.id), embedding=track.embedding, quality=track.quality))
+        audit(session, actor, "person.sample_added", "person", person.id, {"station_id": station.id, "track_id": track.track_id})
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    session.refresh(person)
+    return person_out(person)
+
 def record_entry(session: Session, actor: User, station: Station, person_id: str | None, track_id: str | None, decision: str, confidence: float | None, reason: str | None) -> EntryEvent:
     if decision not in {item.value for item in Decision}:
         raise HTTPException(status_code=422, detail="Unsupported entry decision")

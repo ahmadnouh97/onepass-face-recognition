@@ -178,3 +178,28 @@ def test_identity_refresh_retires_tracks_that_are_no_longer_detected(monkeypatch
 
     assert tracks == []
     assert tracker.tracks == {}
+def test_operator_can_add_a_held_capture_to_an_existing_person():
+    with TestClient(app) as client:
+        headers = auth(client)
+        station_id = client.get("/api/stations", headers=headers).json()[0]["id"]
+        fresh_track(station_id, "initial")
+        first_capture = client.post("/api/enrollment-captures", headers=headers, json={"station_id": station_id, "track_id": "initial"}).json()
+        enrolled = client.post("/api/enrollments", headers=headers, json={
+            "station_id": station_id,
+            "capture_id": first_capture["capture_id"],
+            "display_name": "Multiple Samples",
+        })
+        assert enrolled.status_code == 200
+        person_id = enrolled.json()["person"]["id"]
+
+        fresh_track(station_id, "follow-up")
+        follow_up_capture = client.post("/api/enrollment-captures", headers=headers, json={"station_id": station_id, "track_id": "follow-up"}).json()
+        added = client.post(f"/api/people/{person_id}/samples", headers=headers, json={
+            "station_id": station_id,
+            "capture_id": follow_up_capture["capture_id"],
+        })
+
+        assert added.status_code == 200
+        assert added.json()["sample_count"] == 2
+        audit_records = client.get("/api/audit", headers=headers).json()
+        assert any(record["action"] == "person.sample_added" for record in audit_records)

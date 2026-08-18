@@ -48,6 +48,11 @@ class EnrollmentCaptureOut(BaseModel):
     expires_in_seconds: int
 
 
+class FaceSampleAddRequest(BaseModel):
+    station_id: str
+    capture_id: str
+
+
 class EnrollmentCandidate(BaseModel):
     person_id: str
     display_name: str
