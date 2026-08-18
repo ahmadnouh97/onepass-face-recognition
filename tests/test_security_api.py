@@ -1,5 +1,9 @@
 import os
+import sys
+import time
+import types
 from pathlib import Path
+import cv2
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +13,7 @@ os.environ["GATEWATCH_UPLOAD_DIR"] = "db/test-gatewatch-media"
 os.environ["GATEWATCH_DEMO_ADMIN_PASSWORD"] = "test-password"
 
 from conference_security.api import app
-from conference_security.recognition import EnrollmentCaptureStore, Track, iou, trackers
+from conference_security.recognition import EnrollmentCaptureStore, MultiFaceTracker, Track, decode_live_frame, iou, trackers
 from conference_security.db import Base, engine
 from conference_security.config import settings
 
@@ -134,3 +138,43 @@ def test_insightface_loads_only_detection_and_recognition_modules(monkeypatch):
     }
     assert captured["prepare"] == {"ctx_id": -1, "det_size": (512, 512)}
     assert engine.status() == "insightface"
+def test_tagged_live_frames_preserve_the_frame_kind():
+    image = np.full((24, 32, 3), 127, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+
+    kind, decoded = decode_live_frame(b"T" + encoded.tobytes())
+
+    assert kind == "tracking"
+    assert decoded.shape[:2] == image.shape[:2]
+
+
+def test_optical_flow_updates_a_normalized_track_without_identity_inference():
+    tracker = MultiFaceTracker()
+    first = np.zeros((240, 320, 3), dtype=np.uint8)
+    second = np.zeros_like(first)
+    cv2.rectangle(first, (80, 60), (160, 160), (255, 255, 255), 2)
+    cv2.line(first, (85, 65), (155, 155), (255, 255, 255), 2)
+    cv2.rectangle(second, (100, 60), (180, 160), (255, 255, 255), 2)
+    cv2.line(second, (105, 65), (175, 155), (255, 255, 255), 2)
+    track = Track("flow-track", (0.25, 0.25, 0.25, 0.42), [0.1] * 32, 80.0, first[60:160, 80:160], time.monotonic())
+    tracker.tracks[track.track_id] = track
+    tracker._previous_gray = tracker._tracking_gray(first)
+    tracker._initialise_motion(track, tracker._previous_gray)
+
+    tracker.process_tracking(second)
+
+    assert tracker.tracks[track.track_id].box[0] > 0.29
+def test_identity_refresh_retires_tracks_that_are_no_longer_detected(monkeypatch):
+    from conference_security import recognition
+
+    tracker = MultiFaceTracker()
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    stale_track = Track("stale-track", (0.2, 0.2, 0.25, 0.4), [0.1] * 32, 80.0, frame[40:120, 60:140], time.monotonic())
+    tracker.tracks[stale_track.track_id] = stale_track
+    monkeypatch.setattr(recognition.identity_engine, "detect", lambda _: [])
+
+    tracks = tracker.process_identity(frame)
+
+    assert tracks == []
+    assert tracker.tracks == {}

@@ -11,7 +11,7 @@ from .auth import create_token, current_user, decode_token, hash_password, requi
 from .config import settings
 from .db import SessionLocal, get_session, initialize_database
 from .models import AuditLog, ConferenceEvent, Decision, EntryEvent, Person, Role, Station, User
-from .recognition import decode_frame, enrollment_captures, identity_engine, trackers
+from .recognition import Track, decode_live_frame, enrollment_captures, identity_engine, trackers
 from .schemas import EnrollmentCaptureOut, EnrollmentCaptureRequest, EntryDecisionRequest, EntryEventOut, EnrollmentRequest, EventCreate, PersonOut, StationCreate, TokenRequest, TokenResponse, TrackResult, UserCreate
 from .services import active_event, audit, enrollment, last_entry, nearest_people, person_out, record_entry
 
@@ -174,6 +174,43 @@ def audit_log(limit: int = Query(default=100, le=500), session: Session = Depend
     return [{"id": item.id, "action": item.action, "target_type": item.target_type, "target_id": item.target_id, "detail": item.detail, "created_at": item.created_at} for item in session.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(limit)).all()]
 
 
+def refresh_track_recognition(session: Session, track: Track) -> None:
+    track.candidate_id = track.candidate_name = None
+    track.confidence = None
+    if track.quality < 30:
+        track.recognition_status = "low_quality"
+        return
+    if not track.embedding:
+        track.recognition_status = "recognition_unavailable"
+        return
+    candidates = nearest_people(session, track.embedding, limit=2)
+    if not candidates or candidates[0][1] >= settings.recognition_threshold:
+        track.recognition_status = "unknown"
+        return
+    candidate, distance = candidates[0]
+    track.candidate_id = candidate.id
+    track.candidate_name = candidate.display_name
+    track.confidence = round(max(0.0, 1 - distance), 3)
+    track.recognition_status = "ambiguous" if len(candidates) > 1 and candidates[1][1] - distance < 0.04 else "recognized"
+
+
+def serialise_track(session: Session, event: ConferenceEvent | None, track: Track) -> dict:
+    status = track.recognition_status
+    candidate = session.get(Person, track.candidate_id) if track.candidate_id else None
+    prior = last_entry(session, event.id, candidate.id) if event and candidate else None
+    if prior and status == "recognized":
+        status = "reentry"
+    return {
+        "track_id": track.track_id,
+        "box": list(track.box),
+        "status": status,
+        "confidence": track.confidence,
+        "person_id": candidate.id if candidate else None,
+        "person_name": candidate.display_name if candidate else None,
+        "prior_entry_at": prior.isoformat() if prior else None,
+    }
+
+
 @app.websocket("/api/live/{station_id}")
 async def live_gate(websocket: WebSocket, station_id: str, token: str = Query()):
     try:
@@ -190,31 +227,16 @@ async def live_gate(websocket: WebSocket, station_id: str, token: str = Query())
     await websocket.accept()
     try:
         while True:
-            frame = decode_frame(await websocket.receive_bytes())
+            frame_kind, frame = decode_live_frame(await websocket.receive_bytes())
             tracker = trackers.for_station(station_id)
-            tracks = tracker.process(frame)
+            tracks = tracker.process_identity(frame) if frame_kind == "identity" else tracker.process_tracking(frame)
             with SessionLocal() as session:
                 event = active_event(session)
-                response: list[dict] = []
-                for track in tracks:
-                    candidates = nearest_people(session, track.embedding, limit=2) if track.embedding else []
-                    status, candidate, confidence = "unknown", None, None
-                    if track.quality < 30:
-                        status = "low_quality"
-                    elif not track.embedding:
-                        status = "recognition_unavailable"
-                    elif candidates and candidates[0][1] < settings.recognition_threshold:
-                        candidate, distance = candidates[0]
-                        confidence = round(max(0.0, 1 - distance), 3)
-                        status = "recognized"
-                        if len(candidates) > 1 and candidates[1][1] - distance < 0.04:
-                            status = "ambiguous"
-                    prior = last_entry(session, event.id, candidate.id) if candidate else None
-                    if prior and status == "recognized":
-                        status = "reentry"
-                    x, y, width, height = track.box
-                    response.append({"track_id": track.track_id, "box": [x, y, width, height], "status": status, "confidence": confidence, "person_id": candidate.id if candidate else None, "person_name": candidate.display_name if candidate else None, "prior_entry_at": prior.isoformat() if prior else None})
-            await websocket.send_json({"type": "tracks", "tracks": response})
+                if frame_kind == "identity":
+                    for track in tracks:
+                        refresh_track_recognition(session, track)
+                response = [serialise_track(session, event, track) for track in tracks]
+            await websocket.send_json({"type": "tracks", "frame_kind": frame_kind, "tracks": response})
     except WebSocketDisconnect:
         return
     except ValueError as error:
