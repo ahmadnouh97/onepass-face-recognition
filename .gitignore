@@ -174,3 +174,11 @@ cython_debug/
 .pypirc
 
 temp
+# Gatewatch local runtime and frontend artifacts
+.uv-cache/
+frontend/node_modules/
+frontend/dist/
+db/gatewatch.db
+db/test_gatewatch.db
+db/gatewatch-media/
+db/test-gatewatch-media/

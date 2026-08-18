@@ -1,17 +1,26 @@
 [project]
-name = "onepass-face-recognition"
-version = "0.1.0"
-description = "Real-time local face capture and recognition with OpenCV, with optional DeepFace enhancement"
+name = "gatewatch-conference-security"
+version = "0.2.0"
+description = "On-premises multi-station conference entry recognition system"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    "fastapi>=0.115,<1",
     "opencv-python>=4.8,<5",
+    "bcrypt>=4.0,<5",
+    "pydantic-settings>=2.6,<3",
     "python-dotenv>=1,<2",
+    "python-jose[cryptography]>=3.3,<4",
+    "python-multipart>=0.0.12,<1",
+    "sqlalchemy>=2.0,<3",
+    "uvicorn[standard]>=0.32,<1",
 ]
 
 [project.optional-dependencies]
-ml = [
-    "deepface>=0.0.100",
-    "mediapipe>=0.10.14,<0.11",
-    "tf-keras>=2.16,<2.22",
-]
+postgres = ["psycopg[binary]>=3.2,<4"]
+production-recognition = ["insightface>=0.7.3", "onnxruntime==1.20.1"]
+production-recognition-gpu = ["insightface>=0.7.3", "onnxruntime-gpu>=1.19,<2"]
+test = ["httpx>=0.27,<1", "pytest>=8,<9"]
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
