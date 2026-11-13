@@ -6,7 +6,7 @@ The default installation works with OpenCV only, including on machines where Ten
 
 ## Requirements
 
-- Python 3.11 or 3.12
+- Python 3.11.5 or newer, up to Python 3.12
 - A working webcam, or DroidCam configured as a video stream
 - [uv](https://docs.astral.sh/uv/) (recommended)
 
